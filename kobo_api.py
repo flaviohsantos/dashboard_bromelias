@@ -31,12 +31,10 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
 
     # 1. Processa o formulário de CAMPO
     for item in lista_campo:
-        # O Kobo envia as chaves com o nome do grupo na frente (ex: "grp_cadastro/bairro")
         id_planta = item.get("grp_cadastro/id_bromelia_calc") or "Sem ID"
         bairro = item.get("grp_cadastro/bairro") or "Não informado"
         genero = item.get("grp_cadastro/genero") or "Não informado"
         
-        # Coordenadas
         geo = item.get("grp_cadastro/geolocalizacao")
         lat, lon = None, None
         if isinstance(geo, str) and " " in geo:
@@ -46,71 +44,67 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
             except:
                 pass
         
-        plantas.append({
-            "id_bromelia_calc": id_planta,
-            "bairro": bairro,
-            "genero": genero,
-            "latitude": lat,
-            "longitude": lon
-        })
+        plantas.append({"id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero, "latitude": lat, "longitude": lon})
 
-        # 2. Processa as VISITAS
         visitas = item.get("rep_visitas", [])
         if isinstance(visitas, list):
             for v in visitas:
-                # As chaves da visita também vêm com o prefixo "rep_visitas/"
                 data_visita = v.get("rep_visitas/data_visita")
                 presenca = v.get("rep_visitas/presenca_imaturos")
                 
-                # 3. Processa as AMOSTRAS (que estão dentro da visita)
                 amostras = v.get("rep_visitas/rep_amostras", [])
                 if isinstance(amostras, list) and len(amostras) > 0:
                     for a in amostras:
                         dados_tabela.append({
-                            "id_bromelia_calc": id_planta,
-                            "bairro": bairro,
-                            "genero": genero,
-                            "data_visita": data_visita,
-                            "presenca_imaturos": presenca,
+                            "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero,
+                            "data_visita": data_visita, "presenca_imaturos": presenca,
                             "id_amostra_calc": a.get("rep_visitas/rep_amostras/id_amostra_calc")
                         })
                 else:
                     dados_tabela.append({
-                        "id_bromelia_calc": id_planta,
-                        "bairro": bairro,
-                        "genero": genero,
-                        "data_visita": data_visita,
-                        "presenca_imaturos": presenca,
-                        "id_amostra_calc": None
+                        "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero,
+                        "data_visita": data_visita, "presenca_imaturos": presenca, "id_amostra_calc": None
                     })
 
-    # 4. Processa o formulário de LABORATÓRIO
+    # 2. Processa o formulário de LABORATÓRIO
     lab_especies = []
     for item in lista_lab:
         id_amostra = item.get("grp_amostra/id_amostra_lab") or "Sem ID"
-        resultado = item.get("grp_resultado/resultado_amostra")
+        resultado_digitado = item.get("grp_resultado/resultado_amostra") or "nao_processado"
         
         especies = item.get("rep_especies", [])
         if isinstance(especies, list):
             for e in especies:
+                especie_bruta = e.get("rep_especies/especie_identificada") or "nao_identificado"
+                
+                # FORÇA O PADRÃO: Tudo minúsculo e com underline
+                especie_formatada = str(especie_bruta).lower().strip().replace(" ", "_")
+                
+                # Verifica se é Aedes (aegytpi, albopictus, sp)
+                if "aedes" in especie_formatada:
+                    resultado_real = "Positivo (Aedes)"
+                else:
+                    resultado_real = "Negativo (Outros)"
+
                 lab_especies.append({
                     "id_amostra_calc": id_amostra,
-                    "especie_identificada": e.get("rep_especies/especie_identificada") or "Não informado",
+                    "especie_identificada": especie_formatada,
                     "soma_contagem": e.get("rep_especies/soma_contagem") or 0,
-                    "resultado_amostra": resultado
+                    "resultado_digitado": resultado_digitado,
+                    "resultado_real": resultado_real
                 })
     
     df_plantas = pd.DataFrame(plantas)
     df_dados = pd.DataFrame(dados_tabela) if dados_tabela else pd.DataFrame(columns=["id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", "id_amostra_calc"])
-    df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_amostra"])
+    df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real"])
 
-    # Junta campo e laboratório
     if not df_dados.empty and "id_amostra_calc" in df_dados.columns:
         df_final = df_dados.merge(df_lab, on="id_amostra_calc", how="left")
     else:
         df_final = df_dados.copy()
         df_final["especie_identificada"] = None
         df_final["soma_contagem"] = None
-        df_final["resultado_amostra"] = None
+        df_final["resultado_digitado"] = None
+        df_final["resultado_real"] = None
 
     return df_plantas, df_final
