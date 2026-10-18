@@ -5,9 +5,9 @@ import plotly.graph_objects as go
 import folium
 from folium.plugins import MarkerCluster, HeatMap
 from streamlit_folium import st_folium
-import math
 from kobo_api import _get_secret, baixar_formulario, preparar_dados_completos
 
+# Configuração da página
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.caption("Monitoramento mensal e análise laboratorial | Arraial do Cabo-RJ")
@@ -38,6 +38,7 @@ if "resultado_real" in df_dados.columns:
 else:
     df_dados["resultado_real"] = "Nenhum"
 
+# Trava de segurança
 if "soma_contagem" in df_dados.columns:
     df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
     df_dados.loc[df_dados["soma_contagem"] > 200, "soma_contagem"] = 0
@@ -111,54 +112,59 @@ ids_positivos = plantas_positivas["id_bromelia_calc"].unique() if not plantas_po
 col_mapa, col_termo = st.columns([3, 1])
 
 with col_mapa:
-    tab1, tab2 = st.tabs(["📍 Mapa Base, Raio (100m) e Quadrantes", "🔥 Mapa de Calor"])
+    tab1, tab2 = st.tabs(["📍 Mapa Base e Raio (100m)", "🔥 Mapa de Calor"])
 
-    # --- ABA 1: MAPA BASE COM QUADRANTES ---
+    # --- ABA 1: MAPA BASE COM RAIO ---
     with tab1:
         if not df_mapa.empty:
-            m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=14, tiles="OpenStreetMap")
+            # Zoom 15 foca bem na cidade
+            m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
             
-            df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
-            
-            # Lógica de Quadrantes: Conecta plantas positivas que estão a menos de ~100m
-            if not df_calor.empty:
-                coords = df_calor[["latitude", "longitude"]].values.tolist()
-                # Desenha o polígono se houver mais de 2 pontos próximos
-                if len(coords) > 2:
-                    folium.Polygon(
-                        locations=coords, color="#E63946", weight=2, fill=True, 
-                        fill_color="#E63946", fill_opacity=0.2, popup="Quadrante de Risco"
-                    ).add_to(m1)
-
-                # Desenha os raios de 100m
-                for _, row in df_calor.iterrows():
-                    folium.Circle(
-                        location=[row["latitude"], row["longitude"]], radius=100,
-                        color="#E63946", fill=True, fill_color="#E63946", fill_opacity=0.1, weight=1
-                    ).add_to(m1)
-
-            # Adiciona os pinos (cluster)
-            marker_cluster = MarkerCluster().add_to(m1)
             for _, row in df_mapa.iterrows():
                 tem_risco = row["id_bromelia_calc"] in ids_positivos
-                cor = "red" if tem_risco else "blue"
-                folium.Marker(
-                    location=[row["latitude"], row["longitude"]],
-                    icon=folium.Icon(color=cor, icon="info-sign"),
-                    popup=f"<b>{row['id_bromelia_calc']}</b><br>{row['bairro']}"
-                ).add_to(marker_cluster)
+                
+                if tem_risco:
+                    # Círculo do raio de 100m
+                    folium.Circle(
+                        location=[row["latitude"], row["longitude"]], 
+                        radius=100,
+                        color="#E63946", fill=True, fill_color="#E63946", fill_opacity=0.2, weight=2,
+                        popup="Raio 100m (Aedes)"
+                    ).add_to(m1)
+                    
+                    folium.Marker(
+                        location=[row["latitude"], row["longitude"]],
+                        icon=folium.Icon(color="red", icon="info-sign"),
+                        popup=f"<b>{row['id_bromelia_calc']}</b><br>POSITIVO"
+                    ).add_to(m1)
+                else:
+                    folium.Marker(
+                        location=[row["latitude"], row["longitude"]],
+                        icon=folium.Icon(color="blue", icon="info-sign"),
+                        popup=f"<b>{row['id_bromelia_calc']}</b><br>Negativo"
+                    ).add_to(m1)
                 
             st_folium(m1, width=None, height=450, key="mapa1")
 
     # --- ABA 2: MAPA DE CALOR ---
     with tab2:
         if not df_mapa.empty:
+            # Zoom 13 para o calor se espalhar visualmente
             m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
+            
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
             
             if not df_calor.empty:
                 heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
-                HeatMap(heat_data, radius=30, blur=20, min_opacity=0.6).add_to(m2)
+                # Raio maior e opacidade mais forte para garantir visualização
+                HeatMap(heat_data, radius=40, blur=25, min_opacity=0.8).add_to(m2)
+                
+                for _, row in df_calor.iterrows():
+                    folium.Marker(
+                        location=[row["latitude"], row["longitude"]],
+                        icon=folium.Icon(color="red", icon="info-sign")
+                    ).add_to(m2)
+                    
                 st_folium(m2, width=None, height=450, key="mapa2")
             else:
                 st.info("Nenhuma planta positiva para gerar o mapa de calor.")
@@ -190,7 +196,7 @@ with col_termo:
     fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
     st.plotly_chart(fig_termo, use_container_width=True)
     
-    st.info("Este valor reflete a % de amostras positivas para *Aedes* com base nos filtros.")
+    st.info("Reflete a % de amostras positivas para *Aedes* com base nos filtros.")
 
 # ==========================================
 # MEIO: KPIs
