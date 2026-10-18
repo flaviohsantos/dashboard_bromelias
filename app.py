@@ -25,7 +25,7 @@ if df_plantas.empty:
     st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# --- AUDITORIA DE DADOS ---
+# --- LIMPEZA DE DADOS E TRAVA DE SEGURANÇA ---
 if "resultado_digitado" in df_dados.columns:
     df_dados["resultado_digitado"] = df_dados["resultado_digitado"].fillna("nao_processado").astype(str)
 else:
@@ -35,6 +35,11 @@ if "resultado_real" in df_dados.columns:
     df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
 else:
     df_dados["resultado_real"] = "Nenhum"
+
+# TRAVA: Se a quantidade de larvas for maior que 200, assume que é erro de digitação e zera.
+if "soma_contagem" in df_dados.columns:
+    df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
+    df_dados.loc[df_dados["soma_contagem"] > 200, "soma_contagem"] = 0
 
 erro_1 = (df_dados["resultado_real"] == "Positivo (Aedes)") & (df_dados["resultado_digitado"].str.lower() == "negativo")
 erro_2 = (df_dados["resultado_real"] == "Negativo (Outros)") & (df_dados["resultado_digitado"].str.lower() == "positivo")
@@ -47,11 +52,9 @@ with st.sidebar:
         st.error(f"⚠️ Encontrados **{len(df_erros)}** erros de seleção no laboratório.")
         for idx, row in df_erros.iterrows():
             amostra = row['id_amostra_calc']
-            especie_italico = f"*{str(row['especie_identificada']).replace('_', ' ')}*"
-            
             with st.expander(f"🔍 Amostra {amostra}"):
                 st.write(f"**Planta:** {row['id_bromelia_calc']}")
-                st.write(f"**Espécie encontrada:** {especie_italico}")
+                st.write(f"**Espécie encontrada:** {row['especie_identificada'].replace('_', ' ').capitalize()}")
                 st.write(f"**O técnico marcou:** {row['resultado_digitado'].capitalize()}")
                 st.write(f"**O correto seria:** {row['resultado_real']}")
                 st.warning("O resultado real foi corrigido automaticamente nos gráficos.")
@@ -75,13 +78,13 @@ if genero_sel:
     df_plantas_filtrado = df_plantas_filtrado[df_plantas_filtrado["genero"].isin(genero_sel)]
     df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["genero"].isin(genero_sel)]
 
-# --- FORMATAÇÃO DE NOMES EM ITÁLICO ---
+# --- FORMATAÇÃO DE NOMES (Sem asteriscos para não sujar a tabela) ---
 if "especie_identificada" in df_dados_filtrado.columns:
     df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
-        lambda x: f"*{str(x).replace('_', ' ').capitalize()}*" if pd.notna(x) else "*Não informado*"
+        lambda x: f"{str(x).replace('_', ' ').capitalize()}" if pd.notna(x) else "Não informado"
     )
 else:
-    df_dados_filtrado["especie_display"] = "*Não informado*"
+    df_dados_filtrado["especie_display"] = "Não informado"
 
 # 4. KPIs
 st.markdown("### 📊 Indicadores-chave")
@@ -90,9 +93,14 @@ n_plantas = df_plantas_filtrado["id_bromelia_calc"].nunique()
 n_visitas = df_dados_filtrado["data_visita"].notna().sum() if "data_visita" in df_dados_filtrado.columns else 0
 n_amostras = df_dados_filtrado["id_amostra_calc"].nunique() if "id_amostra_calc" in df_dados_filtrado.columns else 0
 
-amostras_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]["id_amostra_calc"].nunique() if "id_amostra_calc" in df_dados_filtrado.columns else 0
+if "especie_identificada" in df_dados_filtrado.columns and "id_amostra_calc" in df_dados_filtrado.columns:
+    amostras_com_aedes = df_dados_filtrado[df_dados_filtrado["especie_identificada"].str.contains("aedes", case=False, na=False)]
+    amostras_positivas = amostras_com_aedes["id_amostra_calc"].nunique()
+else:
+    amostras_positivas = 0
+
 positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
-total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum() if "soma_contagem" in df_dados_filtrado.columns else 0
+total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum()
 
 c1.metric("Plantas", n_plantas)
 c2.metric("Visitas", n_visitas)
@@ -150,8 +158,6 @@ with col_esq:
             xaxis_title="", 
             yaxis_title="Qtd. de Espécimes"
         )
-        fig_esp.update_xaxes(tickmode='array', tickvals=df_especies_counts["especie_display"], ticktext=df_especies_counts["especie_display"])
-        
         st.plotly_chart(fig_esp, use_container_width=True)
 
 with col_dir:
@@ -178,7 +184,7 @@ with col_a:
     if not df_plantas_filtrado.empty:
         cont = df_plantas_filtrado["genero"].value_counts().reset_index()
         cont.columns = ["genero", "quantidade"]
-        cont["genero_display"] = cont["genero"].apply(lambda x: f"*{str(x).capitalize()}*")
+        cont["genero_display"] = cont["genero"].apply(lambda x: f"{str(x).capitalize()}")
         fig_pie = px.pie(cont, names="genero_display", values="quantidade", hole=0.4)
         st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -187,7 +193,7 @@ with col_b:
     if not df_plantas_filtrado.empty:
         cont = df_plantas_filtrado["bairro"].value_counts().reset_index()
         cont.columns = ["bairro", "quantidade"]
-        cont["bairro_display"] = cont["bairro"].apply(lambda x: f"*{str(x).replace('_', ' ').capitalize()}*")
+        cont["bairro_display"] = cont["bairro"].apply(lambda x: f"{str(x).replace('_', ' ').capitalize()}")
         fig_bar = px.bar(cont, x="quantidade", y="bairro_display", orientation="h", color="quantidade")
         st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -201,5 +207,5 @@ if not df_dados_filtrado.empty and colunas_existentes:
         "id_bromelia_calc": "Planta", "bairro": "Bairro", "genero": "Gênero", "data_visita": "Data Visita",
         "id_amostra_calc": "Amostra", "especie_display": "Espécie (Lab)", "resultado_real": "Result. Real", "resultado_digitado": "Result. Digitado"
     })
-    df_exibicao["Gênero"] = df_exibicao["Gênero"].apply(lambda x: f"*{str(x).capitalize()}*")
+    df_exibicao["Gênero"] = df_exibicao["Gênero"].apply(lambda x: f"{str(x).capitalize()}")
     st.dataframe(df_exibicao, use_container_width=True, height=400)
