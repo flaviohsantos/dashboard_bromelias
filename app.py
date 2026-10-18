@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import folium
+from folium.plugins import MarkerCluster, HeatMap, GroupedLayerControl
 from streamlit_folium import st_folium
 from kobo_api import _get_secret, baixar_formulario, preparar_dados_completos
 
@@ -37,7 +38,6 @@ if "resultado_real" in df_dados.columns:
 else:
     df_dados["resultado_real"] = "Nenhum"
 
-# Trava de segurança para números absurdos
 if "soma_contagem" in df_dados.columns:
     df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
     df_dados.loc[df_dados["soma_contagem"] > 200, "soma_contagem"] = 0
@@ -51,15 +51,13 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🚨 Auditoria de Laboratório")
     if not df_erros.empty:
-        st.error(f"⚠️ Encontrados **{len(df_erros)}** erros de seleção no laboratório.")
+        st.error(f"⚠️ Encontrados **{len(df_erros)}** erros de seleção.")
         for idx, row in df_erros.iterrows():
-            amostra = row['id_amostra_calc']
-            with st.expander(f"🔍 Amostra {amostra}"):
+            with st.expander(f"🔍 Amostra {row['id_amostra_calc']}"):
                 st.write(f"**Planta:** {row['id_bromelia_calc']}")
                 st.write(f"**Espécie:** {row['especie_identificada'].replace('_', ' ').capitalize()}")
-                st.write(f"**O técnico marcou:** {row['resultado_digitado'].capitalize()}")
-                st.write(f"**O correto seria:** {row['resultado_real']}")
-                st.warning("O resultado real foi corrigido automaticamente.")
+                st.write(f"**Digitou:** {row['resultado_digitado'].capitalize()}")
+                st.write(f"**Correto:** {row['resultado_real']}")
     else:
         st.success("✅ Nenhum erro de seleção.")
 
@@ -81,7 +79,6 @@ if genero_sel:
     df_plantas_filtrado = df_plantas_filtrado[df_plantas_filtrado["genero"].isin(genero_sel)]
     df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["genero"].isin(genero_sel)]
 
-# Formatação de nomes
 if "especie_identificada" in df_dados_filtrado.columns:
     df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
         lambda x: f"{str(x).replace('_', ' ').capitalize()}" if pd.notna(x) else "Não informado"
@@ -89,7 +86,7 @@ if "especie_identificada" in df_dados_filtrado.columns:
 else:
     df_dados_filtrado["especie_display"] = "Não informado"
 
-# Cálculos base para os KPIs e Termômetro
+# Cálculos base
 n_plantas = df_plantas_filtrado["id_bromelia_calc"].nunique()
 n_visitas = df_dados_filtrado["data_visita"].notna().sum() if "data_visita" in df_dados_filtrado.columns else 0
 n_amostras = df_dados_filtrado["id_amostra_calc"].nunique() if "id_amostra_calc" in df_dados_filtrado.columns else 0
@@ -104,100 +101,170 @@ positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
 total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum()
 
 # ==========================================
-# TOPO: MAPA DE RISCO E TERMÔMETRO
+# TOPO: MAPAS EM ABAS (TABS)
 # ==========================================
-st.markdown("### 🗺️ Mapa de Risco e Raio de Ação (100m)")
+st.markdown("### 🗺️ Mapas de Risco Georreferenciados")
+
+# Descobre plantas positivas para o mapa
 df_mapa = df_plantas_filtrado.dropna(subset=["latitude", "longitude"])
+plantas_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]
+ids_positivos = plantas_positivas["id_bromelia_calc"].unique() if not plantas_positivas.empty else []
 
-col_mapa, col_termometro = st.columns([2.5, 1])
+# Cria as abas
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📍 Mapa Base e Raio (100m)", 
+    "🔥 Mapa de Calor", 
+    "🌐 Quadrantes / Agrupamentos", 
+    "🏘️ Risco por Bairro"
+])
 
-with col_mapa:
+# --- ABA 1: MAPA BASE E RAIO DE 100M ---
+with tab1:
     if not df_mapa.empty:
-        # Mapa base
-        m = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
-
-        # Encontra plantas positivas
-        plantas_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]
-        ids_positivos = plantas_positivas["id_bromelia_calc"].unique()
-
-        # 1. Raio de 100m
+        m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
+        
+        # Raio
         df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
         for _, row in df_calor.iterrows():
             folium.Circle(
                 location=[row["latitude"], row["longitude"]], radius=100,
                 color="#E63946", fill=True, fill_color="#E63946", fill_opacity=0.15, weight=1,
-                popup=f"Raio 100m (Aedes)<br>Planta: {row['id_bromelia_calc']}"
-            ).add_to(m)
+                popup=f"Raio 100m (Aedes)"
+            ).add_to(m1)
 
-        # 2. Heatmap
-        if not df_calor.empty:
-            heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
-            folium.plugins.HeatMap(heat_data, radius=25, blur=15, min_opacity=0.5).add_to(m)
-
-        # 3. Clusters (Pontos)
-        marker_cluster = folium.plugins.MarkerCluster().add_to(m)
+        # Pontos
         for _, row in df_mapa.iterrows():
             tem_risco = row["id_bromelia_calc"] in ids_positivos
             cor = "red" if tem_risco else "blue"
-            status = "⚠️ POSITIVO (Aedes)" if tem_risco else "✅ Negativo"
-            
             folium.Marker(
                 location=[row["latitude"], row["longitude"]],
                 icon=folium.Icon(color=cor, icon="info-sign"),
-                popup=f"<b>Planta:</b> {row['id_bromelia_calc']}<br><b>Bairro:</b> {row['bairro']}<br><b>Status:</b> {status}"
+                popup=f"<b>{row['id_bromelia_calc']}</b><br>{row['bairro']}"
+            ).add_to(m1)
+            
+        st_folium(m1, width=None, height=500, key="mapa1")
+
+# --- ABA 2: MAPA DE CALOR ---
+with tab2:
+    if not df_mapa.empty:
+        m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="CartoDB dark_matter")
+        
+        # Filtra apenas as positivas para o calor
+        df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
+        
+        if not df_calor.empty:
+            heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
+            HeatMap(heat_data, radius=30, blur=20, min_opacity=0.6).add_to(m2)
+            st_folium(m2, width=None, height=500, key="mapa2")
+        else:
+            st.info("Nenhuma planta positiva para gerar o mapa de calor.")
+
+# --- ABA 3: QUADRANTES / AGRUPAMENTO ESPACIAL ---
+with tab3:
+    st.info("💡 **Lógica de Quadrantes:** O mapa agrupa as bromélias positivas próximas e desenha uma área de abrangência. Se duas plantas estiverem no mesmo raio de 100m, o algoritmo as une, simulando a divisão em quadrantes operacionais para os agentes.")
+    if not df_mapa.empty:
+        m3 = folium.Map(location=[-22.9661, -42.0272], zoom_start=14, tiles="OpenStreetMap")
+        
+        # 1. Desenha os agrupamentos (Clusters)
+        marker_cluster = MarkerCluster().add_to(m3)
+        
+        # 2. Cria as "áreas de quadrantes" conectando os pontos próximos
+        if not plantas_positivas.empty and len(ids_positivos) > 0:
+            # Pega coordenadas das plantas positivas
+            coords_positivas = df_calor[["latitude", "longitude"]].values.tolist()
+            
+            # Desenha um polígono convexo (teia) em volta de todas as plantas positivas
+            # Se elas estiverem na mesma vizinhança, a "teia" mostra o quadrante de risco
+            if len(coords_positivas) > 2:
+                folium.Polygon(
+                    locations=coords_positivas,
+                    color="#E63946", weight=2, fill=True, fill_color="#E63946", fill_opacity=0.2,
+                    popup="Quadrante de Risco Operacional"
+                ).add_to(m3)
+            elif len(coords_positivas) > 0:
+                # Se tiver só 1 ou 2 pontos, desenha o raio
+                for lat, lon in coords_positivas:
+                    folium.Circle(location=[lat, lon], radius=100, color="#E63946", fill=True, fill_opacity=0.2).add_to(m3)
+
+        # Adiciona os pinos
+        for _, row in df_mapa.iterrows():
+            tem_risco = row["id_bromelia_calc"] in ids_positivos
+            cor = "red" if tem_risco else "blue"
+            folium.Marker(
+                location=[row["latitude"], row["longitude"]],
+                icon=folium.Icon(color=cor, icon="home"),
+                popup=f"<b>{row['id_bromelia_calc']}</b>"
             ).add_to(marker_cluster)
+            
+        st_folium(m3, width=None, height=500, key="mapa3")
 
-        st_folium(m, width=None, height=450)
+# --- ABA 4: RISCO POR BAIRRO ---
+with tab4:
+    if not df_dados_filtrado.empty:
+        # Calcula positividade por bairro
+        df_bairro = df_dados_filtrado.groupby("bairro").apply(
+            lambda x: pd.Series({
+                "Total Amostras": x["id_amostra_calc"].nunique(),
+                "Amostras Positivas": x[x["resultado_real"] == "Positivo (Aedes)"]["id_amostra_calc"].nunique()
+            })
+        ).reset_index()
+        
+        df_bairro["% Risco"] = (df_bairro["Amostras Positivas"] / df_bairro["Total Amostras"] * 100).round(1)
+        df_bairro = df_bairro.sort_values(by="% Risco", ascending=True)
+        
+        # Gráfico de barras colorido simulando o Choropleth
+        fig_bairro = px.bar(
+            df_bairro, x="% Risco", y="bairro", orientation="h",
+            text="% Risco",
+            color="% Risco",
+            color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], # Azul -> Laranja -> Vermelho
+            title="Percentual de Bromélias Positivas para Aedes por Bairro"
+        )
+        fig_bairro.update_layout(height=400, coloraxis_showscale=False)
+        st.plotly_chart(fig_bairro, use_container_width=True)
     else:
-        st.info("Nenhuma planta com coordenadas para exibir no mapa.")
+        st.info("Sem dados para calcular o risco por bairro.")
 
-with col_termometro:
+# ==========================================
+# TERMÔMETRO DE RISCO E KPIs
+# ==========================================
+st.markdown("---")
+col_kpi1, col_kpi2 = st.columns([1, 3])
+
+with col_kpi1:
     st.markdown("#### 🌡️ Termômetro de Risco")
-    # Define a cor baseada na positividade
     if positividade < 15:
-        cor_termo = "#2E86AB" # Azul (Baixo)
-        status_risco = "BAIXO"
+        cor_termo, status_risco = "#2E86AB", "BAIXO"
     elif positividade < 40:
-        cor_termo = "#F4A261" # Laranja (Médio)
-        status_risco = "MÉDIO"
+        cor_termo, status_risco = "#F4A261", "MÉDIO"
     else:
-        cor_termo = "#E63946" # Vermelho (Alto)
-        status_risco = "ALTO"
+        cor_termo, status_risco = "#E63946", "ALTO"
 
-    # Cria o gráfico de velocímetro (Gauge)
     fig_termo = go.Figure(go.Indicator(
         mode = "gauge+number",
         value = positividade,
-        number = {'suffix': "%", 'font': {'size': 40}},
-        title = {'text': f"Risco {status_risco}", 'font': {'size': 18}},
+        number = {'suffix': "%", 'font': {'size': 30}},
+        title = {'text': status_risco, 'font': {'size': 16}},
         gauge = {
-            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'axis': {'range': [0, 100]},
             'bar': {'color': cor_termo},
-            'bgcolor': "white",
-            'borderwidth': 2,
-            'bordercolor': "gray",
             'steps': [
-                {'range': [0, 15], 'color': '#D6EAF8'},   # Fundo Azul claro
-                {'range': [15, 40], 'color': '#FDEBD0'}, # Fundo Laranja claro
-                {'range': [40, 100], 'color': '#FADBD8'} # Fundo Vermelho claro
+                {'range': [0, 15], 'color': '#D6EAF8'},
+                {'range': [15, 40], 'color': '#FDEBD0'},
+                {'range': [40, 100], 'color': '#FADBD8'}
             ],
         }
     ))
-    fig_termo.update_layout(height=300, margin=dict(l=10, r=10, t=50, b=10))
+    fig_termo.update_layout(height=250, margin=dict(l=10, r=10, t=40, b=10))
     st.plotly_chart(fig_termo, use_container_width=True)
-    
-    st.info("Este termômetro reflete a porcentagem de amostras positivas para *Aedes* com base nos filtros atuais.")
 
-# ==========================================
-# MEIO: KPIs
-# ==========================================
-st.markdown("### 📊 Indicadores-chave")
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Plantas", n_plantas)
-c2.metric("Visitas", n_visitas)
-c3.metric("Amostras", n_amostras)
-c4.metric("Positividade (Aedes)", f"{positividade:.1f}%")
-c5.metric("Espécimes (Lab)", int(total_especimes))
+with col_kpi2:
+    st.markdown("#### 📊 Indicadores-chave")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Plantas", n_plantas)
+    c2.metric("Visitas", n_visitas)
+    c3.metric("Amostras", n_amostras)
+    c4.metric("Espécimes (Lab)", int(total_especimes))
 
 # ==========================================
 # ABAIXO: SÉRIE TEMPORAL E GRÁFICOS
@@ -312,22 +379,6 @@ with col_grafico2:
         st.plotly_chart(fig_vol, use_container_width=True)
     else:
         st.info("Sem dados de volume/temperatura.")
-
-st.markdown("#### 📊 Resumo por Faixa de pH")
-if not df_agua.empty and df_agua["ph_agua"].notna().any():
-    def categorizar_ph(ph):
-        if pd.isna(ph): return "Não medido"
-        elif ph < 6.0: return "Ácido (< 6.0)"
-        elif 6.0 <= ph <= 7.5: return "Neutro (6.0 - 7.5)"
-        else: return "Alcalino (> 7.5)"
-
-    df_agua["faixa_ph"] = df_agua["ph_agua"].apply(categorizar_ph)
-    resumo_ph = df_agua.groupby(["faixa_ph", "status_imatur"]).size().unstack(fill_value=0).reset_index()
-    if "Com Larvas" not in resumo_ph.columns: resumo_ph["Com Larvas"] = 0
-    if "Sem Larvas" not in resumo_ph.columns: resumo_ph["Sem Larvas"] = 0
-    resumo_ph["Total"] = resumo_ph["Com Larvas"] + resumo_ph["Sem Larvas"]
-    resumo_ph["% Positivo"] = (resumo_ph["Com Larvas"] / resumo_ph["Total"] * 100).round(1).astype(str) + "%"
-    st.dataframe(resumo_ph, hide_index=True, use_container_width=True)
 
 # 9. Tabela Consolidada (Movida para o final)
 st.markdown("---")
