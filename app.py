@@ -172,8 +172,23 @@ with col_esq:
 
 with col_dir:
     st.markdown("### 📋 Totais e Percentuais")
+    
+    # Garante que a coluna é numérica e não tem valores nulos que travam a conta
+    df_especies_counts["Total_Larvas"] = pd.to_numeric(df_especies_counts["Total_Larvas"], errors="coerce").fillna(0)
     total_geral = df_especies_counts["Total_Larvas"].sum()
-    df_especies_counts["Percentual (%)"] = (df_especies_counts["Total_Larvas"] / total_geral * 100).round(1).astype(str) + "%"
+    
+    # Calcula o percentual de forma segura
+    if total_geral > 0:
+        percentual = (df_especies_counts["Total_Larvas"] / total_geral * 100).round(1)
+        df_especies_counts["Percentual (%)"] = percentual.astype(str) + "%"
+    else:
+        df_especies_counts["Percentual (%)"] = "0%"
+    
+    # Renomeia colunas para ficarem bonitas
+    df_especies_counts.columns = ["Espécie", "Total de Larvas", "Nº de Amostras", "Percentual (%)"]
+    
+    # Mostra a tabela no Streamlit
+    st.dataframe(df_especies_counts, hide_index=True, use_container_width=True)
     
     df_especies_counts.columns = ["Espécie", "Total de Larvas", "Nº de Amostras", "Percentual (%)"]
     st.dataframe(df_especies_counts, hide_index=True, use_container_width=True)
