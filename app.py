@@ -137,15 +137,14 @@ with col_esq:
     
     df_especies_counts["Total_Larvas"] = pd.to_numeric(df_especies_counts["Total_Larvas"], errors="coerce").fillna(0)
     
-    if not df_especies_counts.empty:
-        # O Plotly aceita HTML/Itálico nativamente no eixo X se configurarmos o texto
-        fig_esp = px.bar(
-            df_especies_counts, 
-            x="especie_display", 
-            y="Total_Larvas", 
-            text="Total_Larvas",
-            color="especie_display", 
-            color_discrete_sequence=px.colors.qualitative.Pastel
+    if not # --- FORMATAÇÃO DE NOMES EM ITÁLICO ---
+# Verifica se a coluna existe antes de tentar formatar
+if "especie_identificada" in df_dados_filtrado.columns:
+    df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
+        lambda x: f"*{str(x).replace('_', ' ').capitalize()}*" if pd.notna(x) else "*Não informado*"
+    )
+else:
+    df_dados_filtrado["especie_display"] = "*Não informado*"
         )
         fig_esp.update_layout(
             showlegend=False, 
