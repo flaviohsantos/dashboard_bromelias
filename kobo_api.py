@@ -53,7 +53,9 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                 vol_agua = v.get("rep_visitas/volume_agua_ml")
                 temp_agua = v.get("rep_visitas/temp_agua_c")
                 ph_agua = v.get("rep_visitas/ph_agua")
-                obs_visita = v.get("rep_visitas/observacoes_visita") # NOVO: Observações
+                
+                # Busca a observação na raiz e dentro do grupo rep_visitas
+                obs_visita = v.get("observacoes_visita") or v.get("rep_visitas/observacoes_visita")
                 
                 amostras = v.get("rep_visitas/rep_amostras", [])
                 if isinstance(amostras, list) and len(amostras) > 0:
@@ -63,7 +65,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                             "data_visita": data_visita, "presenca_imaturos": presenca,
                             "id_amostra_calc": a.get("rep_visitas/rep_amostras/id_amostra_calc"),
                             "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua,
-                            "observacoes_visita": obs_visita # NOVO
+                            "observacoes_visita": obs_visita
                         })
                 else:
                     dados_tabela.append({
@@ -71,14 +73,16 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                         "data_visita": data_visita, "presenca_imaturos": presenca,
                         "id_amostra_calc": None,
                         "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua,
-                        "observacoes_visita": obs_visita # NOVO
+                        "observacoes_visita": obs_visita
                     })
 
     lab_especies = []
     for item in lista_lab:
         id_amostra = item.get("grp_amostra/id_amostra_lab") or "Sem ID"
         resultado_digitado = item.get("grp_resultado/resultado_amostra") or "nao_processado"
-        obs_lab = item.get("observacoes_lab") or item.get("grp_resultado/observacoes_lab") # NOVO: Observações do Lab
+        
+        # Busca a observação na raiz e dentro do grupo
+        obs_lab = item.get("observacoes_lab") or item.get("grp_resultado/observacoes_lab")
         
         especies = item.get("rep_especies", [])
         if isinstance(especies, list):
@@ -97,7 +101,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                     "soma_contagem": e.get("rep_especies/soma_contagem") or 0,
                     "resultado_digitado": resultado_digitado,
                     "resultado_real": resultado_real,
-                    "observacoes_lab": obs_lab # NOVO
+                    "observacoes_lab": obs_lab
                 })
     
     df_plantas = pd.DataFrame(plantas)
