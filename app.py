@@ -319,8 +319,11 @@ with col_grafico2:
 st.markdown("---")
 st.markdown("### 📝 Notas e Intercorrências de Campo")
 if "observacoes_visita" in df_dados_filtrado.columns:
-    df_obs = df_dados_filtrado.dropna(subset=["observacoes_visita"]).copy()
-    df_obs = df_obs[df_obs["observacoes_visita"].astype(str).str.strip() != ""]
+    df_obs = df_dados_filtrado.copy()
+    # Converte para texto, remove nulos, e tira espaços em branco
+    df_obs["observacoes_visita"] = df_obs["observacoes_visita"].astype(str).str.strip()
+    # Filtra apenas onde tem texto válido (diferente de "nan" e vazio)
+    df_obs = df_obs[(df_obs["observacoes_visita"] != "") & (df_obs["observacoes_visita"].str.lower() != "nan")]
     
     if not df_obs.empty:
         df_obs = df_obs.drop_duplicates(subset=["id_bromelia_calc", "data_visita"])
@@ -333,8 +336,9 @@ if "observacoes_visita" in df_dados_filtrado.columns:
 # --- NOTAS DO LABORATÓRIO ---
 st.markdown("### 🔬 Notas do Laboratório")
 if "observacoes_lab" in df_dados_filtrado.columns:
-    df_lab_obs = df_dados_filtrado.dropna(subset=["observacoes_lab"]).copy()
-    df_lab_obs = df_lab_obs[df_lab_obs["observacoes_lab"].astype(str).str.strip() != ""]
+    df_lab_obs = df_dados_filtrado.copy()
+    df_lab_obs["observacoes_lab"] = df_lab_obs["observacoes_lab"].astype(str).str.strip()
+    df_lab_obs = df_lab_obs[(df_lab_obs["observacoes_lab"] != "") & (df_lab_obs["observacoes_lab"].str.lower() != "nan")]
     
     if not df_lab_obs.empty:
         df_lab_obs = df_lab_obs.drop_duplicates(subset=["id_amostra_calc"])
@@ -342,6 +346,7 @@ if "observacoes_lab" in df_dados_filtrado.columns:
             st.warning(f"**Amostra {row['id_amostra_calc']}**: *\"{row['observacoes_lab']}\"*")
     else:
         st.success("✅ Nenhuma observação registrada no laboratório.")
+
 
 # 9. Tabela Consolidada (Movida para o final)
 st.markdown("---")
