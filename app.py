@@ -23,46 +23,85 @@ if df_campo.empty:
 
 # Filtros
 st.sidebar.header("🔎 Filtros")
+
 col_bairro = "grp_cadastro/bairro"
 col_genero = "grp_cadastro/genero"
+col_data = "rep_visitas/data_visita"
 
+# 1. Filtro de Bairro
 if col_bairro in df_campo.columns:
     bairros = sorted(df_campo[col_bairro].dropna().unique())
     bairro_sel = st.sidebar.multiselect("Bairro", bairros, default=bairros)
 else:
     bairro_sel = []
 
+# 2. Filtro de Gênero
 if col_genero in df_campo.columns:
     generos = sorted(df_campo[col_genero].dropna().unique())
     genero_sel = st.sidebar.multiselect("Gênero da bromélia", generos, default=generos)
 else:
     genero_sel = []
 
+# 3. Filtro de Data (Calendário)
+if col_data in df_campo.columns:
+    # Converte a coluna para data (datetime) e remove os nulos
+    df_campo[col_data] = pd.to_datetime(df_campo[col_data], errors="coerce")
+    datas_validas = df_campo[col_data].dropna()
+    
+    if not datas_validas.empty:
+        data_min = datas_validas.min().date()
+        data_max = datas_validas.max().date()
+        
+        # Cria o seletor de intervalo de datas na barra lateral
+        periodo_sel = st.sidebar.date_input(
+            "Período (Data da Visita)",
+            value=(data_min, data_max),
+            min_value=data_min,
+            max_value=data_max
+        )
+    else:
+        periodo_sel = None
+else:
+    periodo_sel = None
+
+# Aplica os filtros
 df_filtrado = df.copy()
+
 if bairro_sel and col_bairro in df_filtrado.columns:
     df_filtrado = df_filtrado[df_filtrado[col_bairro].isin(bairro_sel)]
+    
 if genero_sel and col_genero in df_filtrado.columns:
     df_filtrado = df_filtrado[df_filtrado[col_genero].isin(genero_sel)]
+
+# Aplica o filtro de data (se o usuário selecionou um período válido)
+if periodo_sel and len(periodo_sel) == 2 and col_data in df_filtrado.columns:
+    data_ini, data_fim = periodo_sel
+    df_filtrado[col_data] = pd.to_datetime(df_filtrado[col_data], errors="coerce")
+    # Filtra as linhas onde a data está dentro do intervalo
+    df_filtrado = df_filtrado[
+        (df_filtrado[col_data].dt.date >= data_ini) & 
+        (df_filtrado[col_data].dt.date <= data_fim)
+    ]
 
 # KPIs
 st.markdown("### 📊 Indicadores-chave")
 c1, c2, c3, c4, c5 = st.columns(5)
 
-# Bloco de KPIs por este:
-n_plantas = df_campo["grp_cadastro/id_bromelia_calc"].nunique() if "grp_cadastro/id_bromelia_calc" in df_campo.columns else 0
-n_visitas = df_campo["rep_visitas/data_visita"].notna().sum() if "rep_visitas/data_visita" in df_campo.columns else 0
-n_amostras = df_campo["rep_amostras/id_amostra_calc"].notna().sum() if "rep_amostras/id_amostra_calc" in df_campo.columns else 0
+# KPIs (atualizados para usar df_filtrado)
+n_plantas = df_filtrado["grp_cadastro/id_bromelia_calc"].nunique() if "grp_cadastro/id_bromelia_calc" in df_filtrado.columns else 0
+n_visitas = df_filtrado["rep_visitas/data_visita"].notna().sum() if "rep_visitas/data_visita" in df_filtrado.columns else 0
+n_amostras = df_filtrado["rep_amostras/id_amostra_calc"].notna().sum() if "rep_amostras/id_amostra_calc" in df_filtrado.columns else 0
 
 col_pres = "rep_amostras/presenca_imaturos"
-if col_pres in df_campo.columns:
-    total = df_campo[col_pres].notna().sum()
-    positivos = (df_campo[col_pres] == "presenca").sum()
+if col_pres in df_filtrado.columns:
+    total = df_filtrado[col_pres].notna().sum()
+    positivos = (df_filtrado[col_pres] == "presenca").sum()
     positividade = (positivos / total * 100) if total > 0 else 0
 else:
     positividade = 0
 
 col_soma = "rep_especies/soma_contagem"
-total_especimes = pd.to_numeric(df[col_soma], errors="coerce").sum() if col_soma in df.columns else 0
+total_especimes = pd.to_numeric(df_filtrado[col_soma], errors="coerce").sum() if col_soma in df_filtrado.columns else 0
 
 c1.metric("Plantas", n_plantas)
 c2.metric("Visitas", n_visitas)
