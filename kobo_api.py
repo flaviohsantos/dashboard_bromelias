@@ -29,15 +29,15 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
     plantas = []
     dados_tabela = []
 
-    # Processa o formulário de CAMPO
+    # 1. Processa o formulário de CAMPO
     for item in lista_campo:
-        cadastro = item.get("grp_cadastro", {})
+        # O Kobo envia as chaves com o nome do grupo na frente (ex: "grp_cadastro/bairro")
+        id_planta = item.get("grp_cadastro/id_bromelia_calc") or "Sem ID"
+        bairro = item.get("grp_cadastro/bairro") or "Não informado"
+        genero = item.get("grp_cadastro/genero") or "Não informado"
         
-        id_planta = cadastro.get("id_bromelia_calc") or "Sem ID"
-        bairro = cadastro.get("bairro") or "Não informado"
-        genero = cadastro.get("genero") or "Não informado"
-        
-        geo = cadastro.get("geolocalizacao")
+        # Coordenadas
+        geo = item.get("grp_cadastro/geolocalizacao")
         lat, lon = None, None
         if isinstance(geo, str) and " " in geo:
             try:
@@ -54,13 +54,16 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
             "longitude": lon
         })
 
+        # 2. Processa as VISITAS
         visitas = item.get("rep_visitas", [])
         if isinstance(visitas, list):
             for v in visitas:
-                data_visita = v.get("data_visita")
-                presenca = v.get("presenca_imaturos")
+                # As chaves da visita também vêm com o prefixo "rep_visitas/"
+                data_visita = v.get("rep_visitas/data_visita")
+                presenca = v.get("rep_visitas/presenca_imaturos")
                 
-                amostras = v.get("rep_amostras", [])
+                # 3. Processa as AMOSTRAS (que estão dentro da visita)
+                amostras = v.get("rep_visitas/rep_amostras", [])
                 if isinstance(amostras, list) and len(amostras) > 0:
                     for a in amostras:
                         dados_tabela.append({
@@ -69,7 +72,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                             "genero": genero,
                             "data_visita": data_visita,
                             "presenca_imaturos": presenca,
-                            "id_amostra_calc": a.get("id_amostra_calc")
+                            "id_amostra_calc": a.get("rep_visitas/rep_amostras/id_amostra_calc")
                         })
                 else:
                     dados_tabela.append({
@@ -81,20 +84,19 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                         "id_amostra_calc": None
                     })
 
-    # Processa o formulário de LABORATÓRIO
+    # 4. Processa o formulário de LABORATÓRIO
     lab_especies = []
     for item in lista_lab:
-        grupo_amostra = item.get("grp_amostra", {})
-        id_amostra = grupo_amostra.get("id_amostra_lab") or "Sem ID"
-        resultado = item.get("resultado_amostra")
+        id_amostra = item.get("grp_amostra/id_amostra_lab") or "Sem ID"
+        resultado = item.get("grp_resultado/resultado_amostra")
         
         especies = item.get("rep_especies", [])
         if isinstance(especies, list):
             for e in especies:
                 lab_especies.append({
                     "id_amostra_calc": id_amostra,
-                    "especie_identificada": e.get("especie_identificada") or "Não informado",
-                    "soma_contagem": e.get("soma_contagem") or 0,
+                    "especie_identificada": e.get("rep_especies/especie_identificada") or "Não informado",
+                    "soma_contagem": e.get("rep_especies/soma_contagem") or 0,
                     "resultado_amostra": resultado
                 })
     
@@ -102,6 +104,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
     df_dados = pd.DataFrame(dados_tabela) if dados_tabela else pd.DataFrame(columns=["id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", "id_amostra_calc"])
     df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_amostra"])
 
+    # Junta campo e laboratório
     if not df_dados.empty and "id_amostra_calc" in df_dados.columns:
         df_final = df_dados.merge(df_lab, on="id_amostra_calc", how="left")
     else:
