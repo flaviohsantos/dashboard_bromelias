@@ -52,18 +52,26 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                 data_visita = v.get("rep_visitas/data_visita")
                 presenca = v.get("rep_visitas/presenca_imaturos")
                 
+                # Pega os dados físico-químicos da água
+                vol_agua = v.get("rep_visitas/volume_agua_ml")
+                temp_agua = v.get("rep_visitas/temp_agua_c")
+                ph_agua = v.get("rep_visitas/ph_agua")
+                
                 amostras = v.get("rep_visitas/rep_amostras", [])
                 if isinstance(amostras, list) and len(amostras) > 0:
                     for a in amostras:
                         dados_tabela.append({
                             "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero,
                             "data_visita": data_visita, "presenca_imaturos": presenca,
-                            "id_amostra_calc": a.get("rep_visitas/rep_amostras/id_amostra_calc")
+                            "id_amostra_calc": a.get("rep_visitas/rep_amostras/id_amostra_calc"),
+                            "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua
                         })
                 else:
                     dados_tabela.append({
                         "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero,
-                        "data_visita": data_visita, "presenca_imaturos": presenca, "id_amostra_calc": None
+                        "data_visita": data_visita, "presenca_imaturos": presenca,
+                        "id_amostra_calc": None,
+                        "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua
                     })
 
     # 2. Processa o formulário de LABORATÓRIO
@@ -76,11 +84,9 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
         if isinstance(especies, list):
             for e in especies:
                 especie_bruta = e.get("rep_especies/especie_identificada") or "nao_identificado"
-                
                 # FORÇA O PADRÃO: Tudo minúsculo e com underline
                 especie_formatada = str(especie_bruta).lower().strip().replace(" ", "_")
                 
-                # Verifica se é Aedes (aegytpi, albopictus, sp)
                 if "aedes" in especie_formatada:
                     resultado_real = "Positivo (Aedes)"
                 else:
@@ -95,7 +101,10 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                 })
     
     df_plantas = pd.DataFrame(plantas)
-    df_dados = pd.DataFrame(dados_tabela) if dados_tabela else pd.DataFrame(columns=["id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", "id_amostra_calc"])
+    df_dados = pd.DataFrame(dados_tabela) if dados_tabela else pd.DataFrame(columns=[
+        "id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", 
+        "id_amostra_calc", "volume_agua_ml", "temp_agua_c", "ph_agua"
+    ])
     df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real"])
 
     if not df_dados.empty and "id_amostra_calc" in df_dados.columns:
