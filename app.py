@@ -140,7 +140,7 @@ with col_mapa:
                 else:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>Negativo").add_to(m1)
             
-            st_folium(m1, width=None, height=500, key="mapa_base")
+            st_folium(m1, width=None, height=500, key=f"mapa_calor_{tipo_mapa}")
             
         else:
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
@@ -154,7 +154,7 @@ with col_mapa:
                 for _, row in df_calor.iterrows():
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="white", icon="info-sign")).add_to(m2)
                     
-                st_folium(m2, width=None, height=500, key="mapa_calor")
+                st_folium(m2, width=None, height=500, key=f"mapa_calor_{tipo_mapa}")
             else:
                 st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
     else:
