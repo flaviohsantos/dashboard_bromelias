@@ -26,9 +26,11 @@ if df_plantas.empty:
     st.stop()
 
 # --- AUDITORIA DE DADOS ---
+# Compara o que o técnico digitou (resultado_digitado) com o que deveria ser (resultado_real)
 df_dados["resultado_digitado"] = df_dados["resultado_digitado"].fillna("nao_processado").astype(str)
 df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
 
+# Erro se o técnico digitou "Negativo", mas tem Aedes (ou vice-versa)
 erro_1 = (df_dados["resultado_real"] == "Positivo (Aedes)") & (df_dados["resultado_digitado"].str.lower() == "negativo")
 erro_2 = (df_dados["resultado_real"] == "Negativo (Outros)") & (df_dados["resultado_digitado"].str.lower() == "positivo")
 df_erros = df_dados[erro_1 | erro_2].copy()
@@ -40,12 +42,9 @@ with st.sidebar:
         st.error(f"⚠️ Encontrados **{len(df_erros)}** erros de seleção no laboratório.")
         for idx, row in df_erros.iterrows():
             amostra = row['id_amostra_calc']
-            # Deixa a espécie em itálico no popup da auditoria
-            especie_italico = f"*{row['especie_identificada'].replace('_', ' ')}*"
-            
             with st.expander(f"🔍 Amostra {amostra}"):
                 st.write(f"**Planta:** {row['id_bromelia_calc']}")
-                st.write(f"**Espécie encontrada:** {especie_italico}")
+                st.write(f"**Espécie encontrada:** {row['especie_identificada']}")
                 st.write(f"**O técnico marcou:** {row['resultado_digitado'].capitalize()}")
                 st.write(f"**O correto seria:** {row['resultado_real']}")
                 st.warning("O resultado real foi corrigido automaticamente nos gráficos.")
@@ -69,12 +68,6 @@ if genero_sel:
     df_plantas_filtrado = df_plantas_filtrado[df_plantas_filtrado["genero"].isin(genero_sel)]
     df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["genero"].isin(genero_sel)]
 
-# --- FORMATAÇÃO DE NOMES EM ITÁLICO ---
-# Cria uma coluna temporária com os nomes bonitos e em itálico para o gráfico e tabela
-df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
-    lambda x: f"*{str(x).replace('_', ' ').capitalize()}*"
-)
-
 # 4. KPIs
 st.markdown("### 📊 Indicadores-chave")
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -82,6 +75,7 @@ n_plantas = df_plantas_filtrado["id_bromelia_calc"].nunique()
 n_visitas = df_dados_filtrado["data_visita"].notna().sum()
 n_amostras = df_dados_filtrado["id_amostra_calc"].nunique()
 
+# Agora a positividade usa o "resultado_real" (calculado pelas espécies)
 amostras_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]["id_amostra_calc"].nunique()
 positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
 total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum()
@@ -121,32 +115,15 @@ st.markdown("---")
 col_esq, col_dir = st.columns([2, 1])
 with col_esq:
     st.markdown("### 🦟 Frequência de Espécies Identificadas")
-    # Agrupa usando a coluna de exibição em itálico
-    df_especies_counts = df_dados_filtrado.groupby("especie_display").agg(
+    df_especies_counts = df_dados_filtrado.groupby("especie_identificada").agg(
         Total_Larvas=("soma_contagem", "sum"),
         Amostras=("id_amostra_calc", "nunique")
     ).reset_index().sort_values(by="Total_Larvas", ascending=False)
-    
     df_especies_counts["Total_Larvas"] = pd.to_numeric(df_especies_counts["Total_Larvas"], errors="coerce").fillna(0)
     
     if not df_especies_counts.empty:
-        # O Plotly aceita HTML/Itálico nativamente no eixo X se configurarmos o texto
-        fig_esp = px.bar(
-            df_especies_counts, 
-            x="especie_display", 
-            y="Total_Larvas", 
-            text="Total_Larvas",
-            color="especie_display", 
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        fig_esp.update_layout(
-            showlegend=False, 
-            xaxis_title="", 
-            yaxis_title="Qtd. de Espécimes"
-        )
-        # O Plotly converte o markdown para HTML no eixo para ficar itálico
-        fig_esp.update_xaxes(tickmode='array', tickvals=df_especies_counts["especie_display"], ticktext=df_especies_counts["especie_display"])
-        
+        fig_esp = px.bar(df_especies_counts, x="especie_identificada", y="Total_Larvas", color="especie_identificada", text="Total_Larvas", color_discrete_sequence=px.colors.qualitative.Pastel)
+        fig_esp.update_layout(showlegend=False, xaxis_title="", yaxis_title="Qtd. de Espécimes")
         st.plotly_chart(fig_esp, use_container_width=True)
 
 with col_dir:
@@ -159,10 +136,9 @@ with col_dir:
         else:
             df_especies_counts["Percentual (%)"] = "0%"
         
-        df_tabela = df_especies_counts.rename(columns={"especie_display": "Espécie", "Total_Larvas": "Total Larvas", "Amostras": "Nº Amostras", "Percentual (%)": "Percentual"})
+        df_tabela = df_especies_counts.rename(columns={"especie_identificada": "Espécie", "Total_Larvas": "Total Larvas", "Amostras": "Nº Amostras", "Percentual (%)": "Percentual"})
         linha_total = pd.DataFrame([{"Espécie": "TOTAL GERAL", "Total Larvas": total_geral, "Nº Amostras": df_especies_counts["Amostras"].sum(), "Percentual": "100%"}])
         df_tabela = pd.concat([df_tabela, linha_total], ignore_index=True)
-        
         st.dataframe(df_tabela, hide_index=True, use_container_width=True)
 
 # 8. Gráficos Gerais
@@ -173,30 +149,22 @@ with col_a:
     if not df_plantas_filtrado.empty:
         cont = df_plantas_filtrado["genero"].value_counts().reset_index()
         cont.columns = ["genero", "quantidade"]
-        # Deixa o nome do gênero em itálico também
-        cont["genero_display"] = cont["genero"].apply(lambda x: f"*{str(x).capitalize()}*")
-        fig_pie = px.pie(cont, names="genero_display", values="quantidade", hole=0.4)
-        st.plotly_chart(fig_pie, use_container_width=True)
-
+        st.plotly_chart(px.pie(cont, names="genero", values="quantidade", hole=0.4), use_container_width=True)
 with col_b:
     st.markdown("#### 🏘️ Plantas por bairro")
     if not df_plantas_filtrado.empty:
         cont = df_plantas_filtrado["bairro"].value_counts().reset_index()
         cont.columns = ["bairro", "quantidade"]
-        cont["bairro_display"] = cont["bairro"].apply(lambda x: f"*{str(x).replace('_', ' ').capitalize()}*")
-        fig_bar = px.bar(cont, x="quantidade", y="bairro_display", orientation="h", color="quantidade")
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(px.bar(cont, x="quantidade", y="bairro", orientation="h", color="quantidade"), use_container_width=True)
 
 # 9. Tabela Consolidada
 st.markdown("### 📋 Tabela consolidada de campo e laboratório")
-colunas_uteis = ["id_bromelia_calc", "bairro", "genero", "data_visita", "id_amostra_calc", "especie_display", "resultado_real", "resultado_digitado"]
+colunas_uteis = ["id_bromelia_calc", "bairro", "genero", "data_visita", "id_amostra_calc", "especie_identificada", "resultado_real", "resultado_digitado"]
 colunas_existentes = [c for c in colunas_uteis if c in df_dados_filtrado.columns]
 
 if not df_dados_filtrado.empty and colunas_existentes:
     df_exibicao = df_dados_filtrado[colunas_existentes].rename(columns={
         "id_bromelia_calc": "Planta", "bairro": "Bairro", "genero": "Gênero", "data_visita": "Data Visita",
-        "id_amostra_calc": "Amostra", "especie_display": "Espécie (Lab)", "resultado_real": "Result. Real", "resultado_digitado": "Result. Digitado"
+        "id_amostra_calc": "Amostra", "especie_identificada": "Espécie (Lab)", "resultado_real": "Result. Real", "resultado_digitado": "Result. Digitado"
     })
-    # Deixa o gênero da bromélia em itálico na tabela final também
-    df_exibicao["Gênero"] = df_exibicao["Gênero"].apply(lambda x: f"*{str(x).capitalize()}*")
     st.dataframe(df_exibicao, use_container_width=True, height=400)
