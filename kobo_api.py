@@ -9,9 +9,10 @@ def _get_secret(key: str, default: str = "") -> str:
     except Exception:
         return os.environ.get(key, default)
 
-def baixar_formulario(uid: str, token: str, base_url: str) -> pd.DataFrame:
+def baixar_formulario(uid: str, token: str, base_url: str) -> list:
+    """Baixa os dados e retorna a lista bruta (JSON) para não perder a estrutura."""
     if not uid:
-        return pd.DataFrame()
+        return []
     url = f"{base_url}/api/v2/assets/{uid}/data/"
     headers = {"Authorization": f"Token {token}"}
     params = {"format": "json"}
@@ -23,106 +24,97 @@ def baixar_formulario(uid: str, token: str, base_url: str) -> pd.DataFrame:
         registros.extend(payload.get("results", []))
         url = payload.get("next")
         params = {}
-    return pd.DataFrame(registros) if registros else pd.DataFrame()
+    return registros
 
-def carregar_dados():
-    base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
-    token = _get_secret("KOBO_TOKEN")
-    uid_campo = _get_secret("UID_CAMPO")
-    uid_lab = _get_secret("UID_LAB")
+def preparar_dados_completos(lista_campo: list, lista_lab: list):
+    """Transforma as listas aninhadas em um único DataFrame plano e pronto para gráficos."""
+    if not lista_campo:
+        return pd.DataFrame()
 
-    if not token or not uid_campo:
-        st.error("⚠️ Configure KOBO_TOKEN e UID_CAMPO em .streamlit/secrets.toml")
-        st.stop()
+    plantas = []
+    amostras_flat = []
 
-    with st.spinner("Baixando dados do KoboToolbox..."):
-        df_campo = baixar_formulario(uid_campo, token, base_url)
-        df_lab = baixar_formulario(uid_lab, token, base_url)
-    return df_campo, df_lab
-
-def preparar_campo(df_campo: pd.DataFrame) -> pd.DataFrame:
-    if df_campo.empty: return df_campo
-    
-    df_plantas = []
-    for _, row in df_campo.iterrows():
-        # Extrai os dados base da planta
-        planta = {
-            "id_bromelia_calc": row.get("grp_cadastro/id_bromelia_calc"),
-            "bairro": row.get("grp_cadastro/bairro"),
-            "genero": row.get("grp_cadastro/genero"),
-            "data_cadastro": row.get("grp_cadastro/data_cadastro"),
-            "latitude": None,
-            "longitude": None,
-            "visitas": [],
-            "amostras": []
-        }
+    for item in lista_campo:
+        cadastro = item.get("grp_cadastro", {})
+        id_planta = cadastro.get("id_bromelia_calc", "Sem ID")
         
-        # Extrai coordenadas
-        geo = row.get("grp_cadastro/geolocalizacao")
+        # Coordenadas
+        geo = cadastro.get("geolocalizacao", "")
+        lat, lon = None, None
         if isinstance(geo, str) and " " in geo:
-            partes = geo.split()
             try:
-                planta["latitude"] = float(partes[0])
-                planta["longitude"] = float(partes[1])
+                partes = geo.split()
+                lat, lon = float(partes[0]), float(partes[1])
             except:
                 pass
 
-        # Extrai as visitas (lista de dicionários)
-        if isinstance(row.get("rep_visitas"), list):
-            planta["visitas"] = row["rep_visitas"]
-            
-        # Extrai as amostras (lista de dicionários)
-        if isinstance(row.get("rep_amostras"), list):
-            planta["amostras"] = row["rep_amostras"]
+        # Dados base da planta
+        planta_base = {
+            "id_bromelia_calc": id_planta,
+            "bairro": cadastro.get("bairro", "Não informado"),
+            "genero": cadastro.get("genero", "Não informado"),
+            "latitude": lat,
+            "longitude": lon,
+            "data_cadastro": cadastro.get("data_cadastro")
+        }
+        plantas.append(planta_base)
 
-        df_plantas.append(planta)
+        # Processa Visitas e Amostras
+        visitas = item.get("rep_visitas", [])
+        if isinstance(visitas, list):
+            for v in visitas:
+                visita_info = {
+                    "id_bromelia_calc": id_planta,
+                    "data_visita": v.get("data_visita"),
+                    "presenca_imaturos": v.get("presenca_imaturos")
+                }
+                
+                amostras = v.get("rep_amostras", [])
+                if isinstance(amostras, list):
+                    for a in amostras:
+                        amostra_info = visita_info.copy()
+                        amostra_info.update({
+                            "id_amostra_calc": a.get("id_amostra_calc"),
+                            "data_visita": v.get("data_visita") # Garante a data
+                        })
+                        amostras_flat.append(amostra_info)
+
+    # Cria o DataFrame de Plantas
+    df_plantas = pd.DataFrame(plantas)
+    
+    # Cria o DataFrame de Amostras
+    df_amostras = pd.DataFrame(amostras_flat) if amostras_flat else pd.DataFrame(columns=["id_bromelia_calc", "data_visita", "presenca_imaturos", "id_amostra_calc"])
+
+    # Processa o Laboratório
+    lab_especies = []
+    for item in lista_lab:
+        id_amostra = item.get("id_amostra_lab", "")
+        resultado = item.get("resultado_amostra", "")
         
-    return pd.DataFrame(df_plantas)
+        especies = item.get("rep_especies", [])
+        if isinstance(especies, list):
+            for e in especies:
+                lab_especies.append({
+                    "id_amostra_calc": id_amostra,
+                    "especie_identificada": e.get("especie_identificada", "Não identificado"),
+                    "qtd_larvas": e.get("qtd_larvas", 0),
+                    "soma_contagem": e.get("soma_contagem", 0),
+                    "resultado_amostra": resultado
+                })
+                
+    df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "qtd_larvas", "soma_contagem", "resultado_amostra"])
 
-def preparar_lab(df_lab: pd.DataFrame) -> pd.DataFrame:
-    if df_lab.empty: return df_lab
-    
-    df_especies = []
-    for _, row in df_lab.iterrows():
-        amostra_codigo = row.get("id_amostra_lab")
-        if not amostra_codigo:
-            # Tenta achar em outra coluna caso o Kobo mude o nome
-            for k, v in row.items():
-                if "Código da amostra" in k and isinstance(v, str):
-                    amostra_codigo = v
-                    break
-        
-        especies_lista = row.get("rep_especies")
-        if isinstance(especies_lista, list):
-            for esp in especies_lista:
-                if isinstance(esp, dict):
-                    esp["id_amostra_lab"] = amostra_codigo
-                    esp["resultado_amostra"] = row.get("resultado_amostra")
-                    df_especies.append(esp)
-                    
-    return pd.DataFrame(df_especies)
+    # Cruza Amostras com Laboratório
+    if not df_amostras.empty:
+        df_final = df_amostras.merge(df_lab, on="id_amostra_calc", how="left")
+    else:
+        df_final = df_plantas.copy()
+        df_final["id_amostra_calc"] = None
+        df_final["presenca_imaturos"] = None
+        df_final["especie_identificada"] = None
+        df_final["resultado_amostra"] = None
 
-def cruzar_campo_lab(df_campo: pd.DataFrame, df_lab: pd.DataFrame) -> pd.DataFrame:
-    if df_campo.empty: return df_campo
-    if df_lab.empty: 
-        df_campo["especie_identificada"] = None
-        df_campo["resultado_amostra"] = None
-        return df_campo
-
-    # Expande as amostras da planta
-    df_amostras_expandidas = df_campo.explode("amostras").reset_index()
+    # Para o dashboard não perder as plantas que não têm visita, podemos usar o df_plantas para o mapa.
+    # Mas o df_final serve para os KPIs e tabelas.
     
-    # Extrai o ID da amostra de dentro do dicionário
-    def pegar_id_amostra(x):
-        if isinstance(x, dict): return x.get("id_amostra_calc")
-        return None
-    df_amostras_expandidas["id_amostra_calc"] = df_amostras_expandidas["amostras"].apply(pegar_id_amostra)
-    
-    # Faz o merge com o laboratório
-    df_merge = df_amostras_expandidas.merge(
-        df_lab, 
-        left_on="id_amostra_calc", 
-        right_on="id_amostra_lab", 
-        how="left"
-    )
-    return df_merge
+    return df_plantas, df_final
