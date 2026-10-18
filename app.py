@@ -159,39 +159,57 @@ with col_esq:
         Amostras=("id_amostra_calc", "nunique")
     ).reset_index().sort_values(by="Total_Larvas", ascending=False)
     
-    fig_esp = px.bar(
-        df_especies_counts, 
-        x="especie_identificada", 
-        y="Total_Larvas",
-        color="especie_identificada",
-        text="Total_Larvas",
-        color_discrete_sequence=px.colors.qualitative.Pastel
-    )
-    fig_esp.update_layout(showlegend=False, xaxis_title="", yaxis_title="Qtd. de Espécimes")
-    st.plotly_chart(fig_esp, use_container_width=True)
+    # Garante que o gráfico não quebre se estiver vazio
+    df_especies_counts["Total_Larvas"] = pd.to_numeric(df_especies_counts["Total_Larvas"], errors="coerce").fillna(0)
+    
+    if not df_especies_counts.empty:
+        fig_esp = px.bar(
+            df_especies_counts, 
+            x="especie_identificada", 
+            y="Total_Larvas",
+            color="especie_identificada",
+            text="Total_Larvas",
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        fig_esp.update_layout(showlegend=False, xaxis_title="", yaxis_title="Qtd. de Espécimes")
+        st.plotly_chart(fig_esp, use_container_width=True)
+    else:
+        st.info("Sem dados de espécies para gerar o gráfico.")
 
 with col_dir:
     st.markdown("### 📋 Totais e Percentuais")
     
-    # Garante que a coluna é numérica e não tem valores nulos que travam a conta
-    df_especies_counts["Total_Larvas"] = pd.to_numeric(df_especies_counts["Total_Larvas"], errors="coerce").fillna(0)
-    total_geral = df_especies_counts["Total_Larvas"].sum()
-    
-    # Calcula o percentual de forma segura
-    if total_geral > 0:
-        percentual = (df_especies_counts["Total_Larvas"] / total_geral * 100).round(1)
-        df_especies_counts["Percentual (%)"] = percentual.astype(str) + "%"
+    if not df_especies_counts.empty:
+        total_geral = df_especies_counts["Total_Larvas"].sum()
+        
+        # Calcula o percentual
+        if total_geral > 0:
+            percentual = (df_especies_counts["Total_Larvas"] / total_geral * 100).round(1)
+            df_especies_counts["Percentual (%)"] = percentual.astype(str) + "%"
+        else:
+            df_especies_counts["Percentual (%)"] = "0%"
+        
+        # Renomeia colunas para exibição
+        df_tabela = df_especies_counts.rename(columns={
+            "especie_identificada": "Espécie", 
+            "Total_Larvas": "Total Larvas", 
+            "Amostras": "Nº Amostras", 
+            "Percentual (%)": "Percentual"
+        })
+        
+        # Adiciona a linha de Total Geral
+        linha_total = pd.DataFrame([{
+            "Espécie": "TOTAL GERAL",
+            "Total Larvas": total_geral,
+            "Nº Amostras": df_especies_counts["Amostras"].sum(),
+            "Percentual": "100%"
+        }])
+        
+        df_tabela = pd.concat([df_tabela, linha_total], ignore_index=True)
+        
+        st.dataframe(df_tabela, hide_index=True, use_container_width=True)
     else:
-        df_especies_counts["Percentual (%)"] = "0%"
-    
-    # Renomeia colunas para ficarem bonitas
-    df_especies_counts.columns = ["Espécie", "Total de Larvas", "Nº de Amostras", "Percentual (%)"]
-    
-    # Mostra a tabela no Streamlit
-    st.dataframe(df_especies_counts, hide_index=True, use_container_width=True)
-    
-    df_especies_counts.columns = ["Espécie", "Total de Larvas", "Nº de Amostras", "Percentual (%)"]
-    st.dataframe(df_especies_counts, hide_index=True, use_container_width=True)
+        st.info("Sem dados para exibir.")
 
 # 8. Gráficos Gerais
 st.markdown("---")
