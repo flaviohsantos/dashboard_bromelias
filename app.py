@@ -2,9 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import folium
+from folium.plugins import HeatMap
+from streamlit_folium import st_folium
 from kobo_api import _get_secret, baixar_formulario, preparar_dados_completos
 from datetime import datetime
 
+# Configuração da página
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 
 # --- IDENTIFICAÇÃO DO PESQUISADOR (TOPO) ---
@@ -72,6 +76,15 @@ with st.sidebar:
     generos = sorted(df_plantas["genero"].dropna().unique())
     genero_sel = st.multiselect("Gênero da bromélia", generos, default=generos)
 
+    st.markdown("---")
+    st.markdown("### 🗺️ Visualização do Mapa")
+    tipo_mapa = st.radio(
+        "Selecione o mapa:", 
+        ["Mapa Base e Raio (100m)", "🔥 Mapa de Calor (Apenas Focos)"]
+    )
+    if st.button("🔄 Recarregar Mapa"):
+        st.rerun()
+
 df_plantas_filtrado = df_plantas.copy()
 df_dados_filtrado = df_dados.copy()
 
@@ -104,23 +117,13 @@ positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
 total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum()
 
 # ==========================================
-# TOPO: MAPAS E TERMÔMETRO (SEM ABAS)
+# TOPO: MAPAS E TERMÔMETRO COM CONTROLE DE ESTADO
 # ==========================================
-import folium
-from folium.plugins import HeatMap
-from streamlit_folium import st_folium
-
 st.markdown("### 🗺️ Mapas de Risco Georreferenciados e Termômetro")
 
 df_mapa = df_plantas_filtrado.dropna(subset=["latitude", "longitude"])
 plantas_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]
 ids_positivos = plantas_positivas["id_bromelia_calc"].unique() if not plantas_positivas.empty else []
-
-# Filtro para escolher o mapa na barra lateral
-with st.sidebar:
-    st.markdown("---")
-    st.markdown("### 🗺️ Visualização do Mapa")
-    tipo_mapa = st.radio("Selecione o tipo de mapa:", ["Mapa Base e Raio (100m)", "Mapa de Calor"])
 
 col_mapa, col_termo = st.columns([3, 1])
 
@@ -136,23 +139,24 @@ with col_mapa:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>POSITIVO").add_to(m1)
                 else:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>Negativo").add_to(m1)
+            
             st_folium(m1, width=None, height=500, key="mapa_base")
             
-        elif tipo_mapa == "Mapa de Calor":
-            m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
-            
+        else:
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
             
             if not df_calor.empty:
+                m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="CartoDB dark_matter")
+                
                 heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
                 HeatMap(heat_data, radius=45, blur=30, min_opacity=0.7).add_to(m2)
                 
                 for _, row in df_calor.iterrows():
-                    folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red", icon="info-sign")).add_to(m2)
+                    folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="white", icon="info-sign")).add_to(m2)
                     
                 st_folium(m2, width=None, height=500, key="mapa_calor")
             else:
-                st.info("Nenhuma planta positiva para gerar o mapa de calor.")
+                st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
     else:
         st.info("Sem dados de localização para exibir o mapa.")
 
@@ -174,7 +178,7 @@ with col_termo:
     fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
     st.plotly_chart(fig_termo, use_container_width=True)
     st.info("Reflete a % de amostras positivas para *Aedes* com base nos filtros.")
-    
+
 # ==========================================
 # MEIO: KPIs E MICROCLIMA
 # ==========================================
