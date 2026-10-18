@@ -29,6 +29,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
     plantas = []
     dados_tabela = []
 
+    # 1. Processa o formulário de CAMPO
     for item in lista_campo:
         id_planta = item.get("grp_cadastro/id_bromelia_calc") or "Sem ID"
         bairro = item.get("grp_cadastro/bairro") or "Não informado"
@@ -54,8 +55,9 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                 temp_agua = v.get("rep_visitas/temp_agua_c")
                 ph_agua = v.get("rep_visitas/ph_agua")
                 
-                # Busca a observação na raiz e dentro do grupo rep_visitas
-                obs_visita = v.get("observacoes_visita") or v.get("rep_visitas/observacoes_visita")
+                # Busca a observação de forma segura
+                obs_visita = v.get("rep_visitas/observacoes_visita") or v.get("observacoes_visita")
+                if str(obs_visita).lower() == "nan": obs_visita = None
                 
                 amostras = v.get("rep_visitas/rep_amostras", [])
                 if isinstance(amostras, list) and len(amostras) > 0:
@@ -76,13 +78,17 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                         "observacoes_visita": obs_visita
                     })
 
+    # 2. Processa o formulário de LABORATÓRIO
     lab_especies = []
     for item in lista_lab:
-        id_amostra = item.get("grp_amostra/id_amostra_lab") or "Sem ID"
+        id_amostra = item.get("grp_amostra/id_amostra_lab")
+        if not id_amostra:
+            continue
+            
         resultado_digitado = item.get("grp_resultado/resultado_amostra") or "nao_processado"
         
-        # Busca a observação na raiz e dentro do grupo
         obs_lab = item.get("observacoes_lab") or item.get("grp_resultado/observacoes_lab")
+        if str(obs_lab).lower() == "nan": obs_lab = None
         
         especies = item.get("rep_especies", [])
         if isinstance(especies, list):
@@ -95,30 +101,41 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                 else:
                     resultado_real = "Negativo (Outros)"
 
+                # Soma das larvas forçada para número inteiro
+                soma_contagem = e.get("rep_especies/soma_contagem")
+                try:
+                    soma_contagem = int(float(soma_contagem)) if soma_contagem else 0
+                except:
+                    soma_contagem = 0
+
                 lab_especies.append({
                     "id_amostra_calc": id_amostra,
                     "especie_identificada": especie_formatada,
-                    "soma_contagem": e.get("rep_especies/soma_contagem") or 0,
+                    "soma_contagem": soma_contagem,
                     "resultado_digitado": resultado_digitado,
                     "resultado_real": resultado_real,
                     "observacoes_lab": obs_lab
                 })
     
+    # 3. Cria os DataFrames
     df_plantas = pd.DataFrame(plantas)
-    df_dados = pd.DataFrame(dados_tabela) if dados_tabela else pd.DataFrame(columns=[
-        "id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", 
-        "id_amostra_calc", "volume_agua_ml", "temp_agua_c", "ph_agua", "observacoes_visita"
-    ])
-    df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real", "observacoes_lab"])
+    
+    if not dados_tabela:
+        df_dados = pd.DataFrame(columns=["id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", "id_amostra_calc", "volume_agua_ml", "temp_agua_c", "ph_agua", "observacoes_visita"])
+    else:
+        df_dados = pd.DataFrame(dados_tabela)
 
+    if not lab_especies:
+        df_lab = pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real", "observacoes_lab"])
+    else:
+        df_lab = pd.DataFrame(lab_especies)
+
+    # 4. Faz o Merge (Junta os dois)
     if not df_dados.empty and "id_amostra_calc" in df_dados.columns:
-        df_final = df_dados.merge(df_lab, on="id_amostra_calc", how="left")
+        df_final = pd.merge(df_dados, df_lab, on="id_amostra_calc", how="left")
     else:
         df_final = df_dados.copy()
-        df_final["especie_identificada"] = None
-        df_final["soma_contagem"] = None
-        df_final["resultado_digitado"] = None
-        df_final["resultado_real"] = None
-        df_final["observacoes_lab"] = None
+        for col in ["especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real", "observacoes_lab"]:
+            df_final[col] = None
 
     return df_plantas, df_final
