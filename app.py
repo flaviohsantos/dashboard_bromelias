@@ -36,22 +36,28 @@ if df_plantas.empty:
     st.stop()
 
 # --- LIMPEZA DE DADOS E AUDITORIA ---
+# 1. Limpa a coluna de resultado digitado
 if "resultado_digitado" in df_dados.columns:
-    df_dados["resultado_digitado"] = df_dados["resultado_digitado"].fillna("nao_processado").astype(str)
+    df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip()
+    df_dados["resultado_digitado"] = df_dados["resultado_digitado"].replace(["nan", "none", ""], "nao_processado")
 else:
     df_dados["resultado_digitado"] = "nao_processado"
 
+# 2. Limpa a coluna de resultado real
 if "resultado_real" in df_dados.columns:
     df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
 else:
     df_dados["resultado_real"] = "Nenhum"
 
+# 3. Trava de segurança para a contagem de larvas
 if "soma_contagem" in df_dados.columns:
     df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
     df_dados.loc[df_dados["soma_contagem"] > 200, "soma_contagem"] = 0
+else:
+    df_dados["soma_contagem"] = 0
 
-erro_1 = (df_dados["resultado_real"] == "Positivo (Aedes)") & (df_dados["resultado_digitado"].str.lower() == "negativo")
-erro_2 = (df_dados["resultado_real"] == "Negativo (Outros)") & (df_dados["resultado_digitado"].str.lower() == "positivo")
+erro_1 = (df_dados["resultado_real"] == "Positivo (Aedes)") & (df_dados["resultado_digitado"] == "negativo")
+erro_2 = (df_dados["resultado_real"] == "Negativo (Outros)") & (df_dados["resultado_digitado"] == "positivo")
 df_erros = df_dados[erro_1 | erro_2].copy()
 
 # --- MENU LATERAL E FILTROS ---
@@ -95,7 +101,7 @@ if genero_sel:
 
 if "especie_identificada" in df_dados_filtrado.columns:
     df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
-        lambda x: f"{str(x).replace('_', ' ').capitalize()}" if pd.notna(x) else "Não informado"
+        lambda x: f"{str(x).replace('_', ' ').capitalize()}" if pd.notna(x) and str(x).lower() != "nan" else "Não informado"
     )
 else:
     df_dados_filtrado["especie_display"] = "Não informado"
@@ -128,9 +134,7 @@ col_mapa, col_termo = st.columns([3, 1])
 with col_mapa:
     if not df_mapa.empty:
         if tipo_mapa == "Mapa Base e Raio (100m)":
-            # --- MAPA BASE ---
             m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
-            
             for _, row in df_mapa.iterrows():
                 tem_risco = row["id_bromelia_calc"] in ids_positivos
                 if tem_risco:
@@ -138,36 +142,19 @@ with col_mapa:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>POSITIVO").add_to(m1)
                 else:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>Negativo").add_to(m1)
-            
             st_folium(m1, width=None, height=500, key="mapa_base_estatico")
             
         else:
-            # --- MAPA DE CALOR ---
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
-            
             if not df_calor.empty:
-                # Fundo claro gratuito
                 m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=14, tiles="OpenStreetMap")
-                
                 heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
-                
-                # Calor em tons escuros para contrastar com o mapa claro
-                HeatMap(
-                    heat_data, 
-                    radius=50, 
-                    blur=30, 
-                    min_opacity=0.8,
-                    gradient={0.2: 'blue', 0.4: 'lime', 0.6: 'yellow', 1: 'red'}
-                ).add_to(m2)
-                
+                HeatMap(heat_data, radius=50, blur=30, min_opacity=0.8, gradient={0.2: 'blue', 0.4: 'lime', 0.6: 'yellow', 1: 'red'}).add_to(m2)
                 for _, row in df_calor.iterrows():
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="black", icon="info-sign")).add_to(m2)
-                    
                 st_folium(m2, width=None, height=500, key="mapa_calor_estatico")
             else:
                 st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
-    else:
-        st.info("Sem dados de localização para exibir o mapa.")
 
 with col_termo:
     st.markdown("#### 🌡️ Termômetro de Risco")
@@ -319,44 +306,35 @@ with col_grafico2:
 st.markdown("---")
 st.markdown("### 📝 Notas e Intercorrências de Campo")
 if "observacoes_visita" in df_dados_filtrado.columns:
-    # Limpeza para não exibir "nan"
+    # Correção: Força a leitura como string e remove os "nans" invisíveis
     df_obs = df_dados_filtrado.copy()
-    df_obs["observacoes_visita"] = df_obs["observacoes_visita"].astype(str).str.strip()
-    df_obs = df_obs[
-        (df_obs["observacoes_visita"] != "") & 
-        (df_obs["observacoes_visita"].str.lower() != "nan") &
-        (df_obs["observacoes_visita"].str.lower() != "none")
-    ]
+    df_obs["observacoes_visita"] = df_obs["observacoes_visita"].astype(str).str.strip().str.lower()
+    df_obs = df_obs[(df_obs["observacoes_visita"] != "") & (df_obs["observacoes_visita"] != "nan") & (df_obs["observacoes_visita"] != "none")]
     
     if not df_obs.empty:
         df_obs = df_obs.drop_duplicates(subset=["id_bromelia_calc", "data_visita"])
         for _, row in df_obs.iterrows():
             data_str = pd.to_datetime(row["data_visita"]).strftime('%d/%m/%Y') if pd.notna(row["data_visita"]) else "Data não informada"
-            st.info(f"**{data_str}** | Planta **{row['id_bromelia_calc']}** (Bairro: {row['bairro']}): *\"{row['observacoes_visita']}\"*")
+            st.info(f"**{data_str}** | Planta **{row['id_bromelia_calc']}** (Bairro: {row['bairro']}): *\"{row['observacoes_visita'].capitalize()}\"*")
     else:
         st.success("✅ Nenhuma intercorrência registrada nas visitas filtradas.")
 
 # --- NOTAS DO LABORATÓRIO ---
 st.markdown("### 🔬 Notas do Laboratório")
 if "observacoes_lab" in df_dados_filtrado.columns:
-    # Limpeza para não exibir "nan"
+    # Correção: Força a leitura como string e remove os "nans" invisíveis
     df_lab_obs = df_dados_filtrado.copy()
-    df_lab_obs["observacoes_lab"] = df_lab_obs["observacoes_lab"].astype(str).str.strip()
-    df_lab_obs = df_lab_obs[
-        (df_lab_obs["observacoes_lab"] != "") & 
-        (df_lab_obs["observacoes_lab"].str.lower() != "nan") &
-        (df_lab_obs["observacoes_lab"].str.lower() != "none")
-    ]
+    df_lab_obs["observacoes_lab"] = df_lab_obs["observacoes_lab"].astype(str).str.strip().str.lower()
+    df_lab_obs = df_lab_obs[(df_lab_obs["observacoes_lab"] != "") & (df_lab_obs["observacoes_lab"] != "nan") & (df_lab_obs["observacoes_lab"] != "none")]
     
     if not df_lab_obs.empty:
         df_lab_obs = df_lab_obs.drop_duplicates(subset=["id_amostra_calc"])
         for _, row in df_lab_obs.iterrows():
-            st.warning(f"**Amostra {row['id_amostra_calc']}**: *\"{row['observacoes_lab']}\"*")
+            st.warning(f"**Amostra {row['id_amostra_calc']}**: *\"{row['observacoes_lab'].capitalize()}\"*")
     else:
         st.success("✅ Nenhuma observação registrada no laboratório.")
 
-
-# 9. Tabela Consolidada (Movida para o final)
+# 9. Tabela Consolidada
 st.markdown("---")
 st.markdown("### 📋 Tabela consolidada de campo e laboratório")
 colunas_uteis = ["id_bromelia_calc", "bairro", "genero", "data_visita", "id_amostra_calc", "especie_display", "resultado_real", "resultado_digitado"]
