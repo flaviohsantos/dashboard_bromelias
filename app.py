@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import folium
-from folium.plugins import MarkerCluster, HeatMap, GroupedLayerControl
+from folium.plugins import MarkerCluster, HeatMap
 from streamlit_folium import st_folium
 from kobo_api import _get_secret, baixar_formulario, preparar_dados_completos
 
@@ -123,7 +123,6 @@ with tab1:
     if not df_mapa.empty:
         m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
         
-        # Raio
         df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
         for _, row in df_calor.iterrows():
             folium.Circle(
@@ -132,7 +131,6 @@ with tab1:
                 popup=f"Raio 100m (Aedes)"
             ).add_to(m1)
 
-        # Pontos
         for _, row in df_mapa.iterrows():
             tem_risco = row["id_bromelia_calc"] in ids_positivos
             cor = "red" if tem_risco else "blue"
@@ -147,9 +145,9 @@ with tab1:
 # --- ABA 2: MAPA DE CALOR ---
 with tab2:
     if not df_mapa.empty:
-        m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="CartoDB dark_matter")
+        # MUDANÇA: OpenStreetMap para garantir que o fundo carregue
+        m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
         
-        # Filtra apenas as positivas para o calor
         df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
         
         if not df_calor.empty:
@@ -161,20 +159,16 @@ with tab2:
 
 # --- ABA 3: QUADRANTES / AGRUPAMENTO ESPACIAL ---
 with tab3:
-    st.info("💡 **Lógica de Quadrantes:** O mapa agrupa as bromélias positivas próximas e desenha uma área de abrangência. Se duas plantas estiverem no mesmo raio de 100m, o algoritmo as une, simulando a divisão em quadrantes operacionais para os agentes.")
+    st.info("💡 **Lógica de Quadrantes:** O mapa agrupa as bromélias positivas próximas e desenha uma área de abrangência operacional (simulando os quadrantes de 400m² para os agentes de endemias).")
     if not df_mapa.empty:
         m3 = folium.Map(location=[-22.9661, -42.0272], zoom_start=14, tiles="OpenStreetMap")
         
-        # 1. Desenha os agrupamentos (Clusters)
         marker_cluster = MarkerCluster().add_to(m3)
         
-        # 2. Cria as "áreas de quadrantes" conectando os pontos próximos
         if not plantas_positivas.empty and len(ids_positivos) > 0:
-            # Pega coordenadas das plantas positivas
+            df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
             coords_positivas = df_calor[["latitude", "longitude"]].values.tolist()
             
-            # Desenha um polígono convexo (teia) em volta de todas as plantas positivas
-            # Se elas estiverem na mesma vizinhança, a "teia" mostra o quadrante de risco
             if len(coords_positivas) > 2:
                 folium.Polygon(
                     locations=coords_positivas,
@@ -182,11 +176,9 @@ with tab3:
                     popup="Quadrante de Risco Operacional"
                 ).add_to(m3)
             elif len(coords_positivas) > 0:
-                # Se tiver só 1 ou 2 pontos, desenha o raio
                 for lat, lon in coords_positivas:
                     folium.Circle(location=[lat, lon], radius=100, color="#E63946", fill=True, fill_opacity=0.2).add_to(m3)
 
-        # Adiciona os pinos
         for _, row in df_mapa.iterrows():
             tem_risco = row["id_bromelia_calc"] in ids_positivos
             cor = "red" if tem_risco else "blue"
@@ -201,7 +193,6 @@ with tab3:
 # --- ABA 4: RISCO POR BAIRRO ---
 with tab4:
     if not df_dados_filtrado.empty:
-        # Calcula positividade por bairro
         df_bairro = df_dados_filtrado.groupby("bairro").apply(
             lambda x: pd.Series({
                 "Total Amostras": x["id_amostra_calc"].nunique(),
@@ -212,12 +203,11 @@ with tab4:
         df_bairro["% Risco"] = (df_bairro["Amostras Positivas"] / df_bairro["Total Amostras"] * 100).round(1)
         df_bairro = df_bairro.sort_values(by="% Risco", ascending=True)
         
-        # Gráfico de barras colorido simulando o Choropleth
         fig_bairro = px.bar(
             df_bairro, x="% Risco", y="bairro", orientation="h",
             text="% Risco",
             color="% Risco",
-            color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], # Azul -> Laranja -> Vermelho
+            color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"],
             title="Percentual de Bromélias Positivas para Aedes por Bairro"
         )
         fig_bairro.update_layout(height=400, coloraxis_showscale=False)
