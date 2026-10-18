@@ -29,16 +29,17 @@ if df_plantas.empty:
     st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# --- FILTROS ---
-st.sidebar.header("🔎 Filtros")
+# Aplica filtros aos dataframes (protegido contra tabelas vazias)
+df_plantas_filtrado = df_plantas.copy()
+df_dados_filtrado = df_dados.copy()
 
-# Filtro de Bairro
-bairros = sorted(df_plantas["bairro"].dropna().unique())
-bairro_sel = st.sidebar.multiselect("Bairro", bairros, default=bairros)
+if bairro_sel:
+    df_plantas_filtrado = df_plantas_filtrado[df_plantas_filtrado["bairro"].isin(bairro_sel)]
+    df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["bairro"].isin(bairro_sel)]
 
-# Filtro de Gênero
-generos = sorted(df_plantas["genero"].dropna().unique())
-genero_sel = st.sidebar.multiselect("Gênero da bromélia", generos, default=generos)
+if genero_sel:
+    df_plantas_filtrado = df_plantas_filtrado[df_plantas_filtrado["genero"].isin(genero_sel)]
+    df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["genero"].isin(genero_sel)]
 
 # Filtro de Data
 data_padrao_inicio = pd.Timestamp.today().date() - pd.Timedelta(days=30)
@@ -56,7 +57,8 @@ df_dados_filtrado = df_dados[
     (df_dados["genero"].isin(genero_sel))
 ].copy()
 
-if len(periodo_sel) == 2:
+# Só tenta filtrar a data se a tabela não estiver vazia e a coluna existir
+if len(periodo_sel) == 2 and not df_dados_filtrado.empty and "data_visita" in df_dados_filtrado.columns:
     df_dados_filtrado["data_visita"] = pd.to_datetime(df_dados_filtrado["data_visita"], errors="coerce")
     df_dados_filtrado = df_dados_filtrado[
         (df_dados_filtrado["data_visita"].dt.date >= periodo_sel[0]) & 
