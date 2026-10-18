@@ -104,8 +104,13 @@ positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
 total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum()
 
 # ==========================================
-# TOPO: MAPAS EM ABAS E TERMÔMETRO (VIA PLOTLY)
 # ==========================================
+# TOPO: MAPAS EM ABAS E TERMÔMETRO
+# ==========================================
+import folium
+from folium.plugins import HeatMap
+from streamlit_folium import st_folium
+
 st.markdown("### 🗺️ Mapas de Risco Georreferenciados e Termômetro")
 
 df_mapa = df_plantas_filtrado.dropna(subset=["latitude", "longitude"])
@@ -117,43 +122,39 @@ col_mapa, col_termo = st.columns([3, 1])
 with col_mapa:
     tab1, tab2 = st.tabs(["📍 Mapa Base e Raio (100m)", "🔥 Mapa de Calor"])
 
+    # --- ABA 1: MAPA BASE COM RAIO ---
     with tab1:
         if not df_mapa.empty:
-            # Mapa base usando Plotly (Não depende de API de mapas)
-            df_mapa["Status"] = df_mapa["id_bromelia_calc"].apply(lambda x: "Positivo (Aedes)" if x in ids_positivos else "Negativo")
+            m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
             
-            fig_m1 = px.scatter_mapbox(
-                df_mapa, lat="latitude", lon="longitude", color="Status",
-                color_discrete_map={"Positivo (Aedes)": "#E63946", "Negativo": "#2E86AB"},
-                hover_name="id_bromelia_calc", hover_data=["bairro", "genero"],
-                zoom=13, height=450
-            )
-            fig_m1.update_layout(mapbox_style="open-street-map", margin={"r":0,"t":0,"l":0,"b":0})
-            
-            # Adiciona os círculos de 100m se houver positivos
-            if not plantas_positivas.empty:
-                for _, row in df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)].iterrows():
-                    fig_m1.add_trace(go.Scattermapbox(
-                        lat=[row["latitude"]], lon=[row["longitude"]],
-                        mode="markers", marker=dict(size=50, color="rgba(230, 57, 70, 0.2)"),
-                        showlegend=False, hoverinfo="skip"
-                    ))
-            
-            st.plotly_chart(fig_m1, use_container_width=True)
+            for _, row in df_mapa.iterrows():
+                tem_risco = row["id_bromelia_calc"] in ids_positivos
+                if tem_risco:
+                    folium.Circle(location=[row["latitude"], row["longitude"]], radius=100, color="#E63946", fill=True, fill_color="#E63946", fill_opacity=0.2, weight=2, popup="Raio 100m (Aedes)").add_to(m1)
+                    folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>POSITIVO").add_to(m1)
+                else:
+                    folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>Negativo").add_to(m1)
+            st_folium(m1, width=None, height=450, key="mapa1")
 
+    # --- ABA 2: MAPA DE CALOR ---
     with tab2:
-        if not df_mapa.empty and not plantas_positivas.empty:
+        if not df_mapa.empty:
+            # Usando OpenStreetMap padrão (gratuito e sem erro de API)
+            m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
+            
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
             
-            fig_m2 = px.density_mapbox(
-                df_calor, lat="latitude", lon="longitude", z="id_bromelia_calc",
-                radius=40, center=dict(lat=-22.9661, lon=-42.0272), zoom=13, height=450,
-                color_continuous_scale=["yellow", "orange", "red"], opacity=0.7
-            )
-            fig_m2.update_layout(mapbox_style="carto-darkmatter", margin={"r":0,"t":0,"l":0,"b":0})
-            st.plotly_chart(fig_m2, use_container_width=True)
-        else:
-            st.info("Nenhuma planta positiva para gerar o mapa de calor.")
+            if not df_calor.empty:
+                heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
+                HeatMap(heat_data, radius=45, blur=30, min_opacity=0.7).add_to(m2)
+                
+                # Adiciona os pinos vermelhos dentro do calor para referência
+                for _, row in df_calor.iterrows():
+                    folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red", icon="info-sign")).add_to(m2)
+                    
+                st_folium(m2, width=None, height=450, key="mapa_calor_novo")
+            else:
+                st.info("Nenhuma planta positiva para gerar o mapa de calor.")
 
 with col_termo:
     st.markdown("#### 🌡️ Termômetro de Risco")
@@ -173,7 +174,6 @@ with col_termo:
     fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
     st.plotly_chart(fig_termo, use_container_width=True)
     st.info("Reflete a % de amostras positivas para *Aedes* com base nos filtros.")
-
 # ==========================================
 # MEIO: KPIs E MICROCLIMA
 # ==========================================
