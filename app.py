@@ -26,7 +26,6 @@ if df_plantas.empty:
     st.stop()
 
 # --- AUDITORIA DE DADOS ---
-# Garante que as colunas existem antes de tentar limpá-las (evita o KeyError)
 if "resultado_digitado" in df_dados.columns:
     df_dados["resultado_digitado"] = df_dados["resultado_digitado"].fillna("nao_processado").astype(str)
 else:
@@ -48,8 +47,7 @@ with st.sidebar:
         st.error(f"⚠️ Encontrados **{len(df_erros)}** erros de seleção no laboratório.")
         for idx, row in df_erros.iterrows():
             amostra = row['id_amostra_calc']
-            # Deixa a espécie em itálico no popup da auditoria
-            especie_italico = f"*{row['especie_identificada'].replace('_', ' ')}*"
+            especie_italico = f"*{str(row['especie_identificada']).replace('_', ' ')}*"
             
             with st.expander(f"🔍 Amostra {amostra}"):
                 st.write(f"**Planta:** {row['id_bromelia_calc']}")
@@ -78,21 +76,23 @@ if genero_sel:
     df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["genero"].isin(genero_sel)]
 
 # --- FORMATAÇÃO DE NOMES EM ITÁLICO ---
-# Cria uma coluna temporária com os nomes bonitos e em itálico para o gráfico e tabela
-df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
-    lambda x: f"*{str(x).replace('_', ' ').capitalize()}*"
-)
+if "especie_identificada" in df_dados_filtrado.columns:
+    df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
+        lambda x: f"*{str(x).replace('_', ' ').capitalize()}*" if pd.notna(x) else "*Não informado*"
+    )
+else:
+    df_dados_filtrado["especie_display"] = "*Não informado*"
 
 # 4. KPIs
 st.markdown("### 📊 Indicadores-chave")
 c1, c2, c3, c4, c5 = st.columns(5)
 n_plantas = df_plantas_filtrado["id_bromelia_calc"].nunique()
-n_visitas = df_dados_filtrado["data_visita"].notna().sum()
-n_amostras = df_dados_filtrado["id_amostra_calc"].nunique()
+n_visitas = df_dados_filtrado["data_visita"].notna().sum() if "data_visita" in df_dados_filtrado.columns else 0
+n_amostras = df_dados_filtrado["id_amostra_calc"].nunique() if "id_amostra_calc" in df_dados_filtrado.columns else 0
 
-amostras_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]["id_amostra_calc"].nunique()
+amostras_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]["id_amostra_calc"].nunique() if "id_amostra_calc" in df_dados_filtrado.columns else 0
 positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
-total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum()
+total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum() if "soma_contagem" in df_dados_filtrado.columns else 0
 
 c1.metric("Plantas", n_plantas)
 c2.metric("Visitas", n_visitas)
@@ -129,7 +129,6 @@ st.markdown("---")
 col_esq, col_dir = st.columns([2, 1])
 with col_esq:
     st.markdown("### 🦟 Frequência de Espécies Identificadas")
-    # Agrupa usando a coluna de exibição em itálico
     df_especies_counts = df_dados_filtrado.groupby("especie_display").agg(
         Total_Larvas=("soma_contagem", "sum"),
         Amostras=("id_amostra_calc", "nunique")
@@ -137,21 +136,20 @@ with col_esq:
     
     df_especies_counts["Total_Larvas"] = pd.to_numeric(df_especies_counts["Total_Larvas"], errors="coerce").fillna(0)
     
-    if not # --- FORMATAÇÃO DE NOMES EM ITÁLICO ---
-# Verifica se a coluna existe antes de tentar formatar
-if "especie_identificada" in df_dados_filtrado.columns:
-    df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
-        lambda x: f"*{str(x).replace('_', ' ').capitalize()}*" if pd.notna(x) else "*Não informado*"
-    )
-else:
-    df_dados_filtrado["especie_display"] = "*Não informado*"
+    if not df_especies_counts.empty:
+        fig_esp = px.bar(
+            df_especies_counts, 
+            x="especie_display", 
+            y="Total_Larvas", 
+            text="Total_Larvas",
+            color="especie_display", 
+            color_discrete_sequence=px.colors.qualitative.Pastel
         )
         fig_esp.update_layout(
             showlegend=False, 
             xaxis_title="", 
             yaxis_title="Qtd. de Espécimes"
         )
-        # O Plotly converte o markdown para HTML no eixo para ficar itálico
         fig_esp.update_xaxes(tickmode='array', tickvals=df_especies_counts["especie_display"], ticktext=df_especies_counts["especie_display"])
         
         st.plotly_chart(fig_esp, use_container_width=True)
@@ -180,7 +178,6 @@ with col_a:
     if not df_plantas_filtrado.empty:
         cont = df_plantas_filtrado["genero"].value_counts().reset_index()
         cont.columns = ["genero", "quantidade"]
-        # Deixa o nome do gênero em itálico também
         cont["genero_display"] = cont["genero"].apply(lambda x: f"*{str(x).capitalize()}*")
         fig_pie = px.pie(cont, names="genero_display", values="quantidade", hole=0.4)
         st.plotly_chart(fig_pie, use_container_width=True)
@@ -204,6 +201,5 @@ if not df_dados_filtrado.empty and colunas_existentes:
         "id_bromelia_calc": "Planta", "bairro": "Bairro", "genero": "Gênero", "data_visita": "Data Visita",
         "id_amostra_calc": "Amostra", "especie_display": "Espécie (Lab)", "resultado_real": "Result. Real", "resultado_digitado": "Result. Digitado"
     })
-    # Deixa o gênero da bromélia em itálico na tabela final também
     df_exibicao["Gênero"] = df_exibicao["Gênero"].apply(lambda x: f"*{str(x).capitalize()}*")
     st.dataframe(df_exibicao, use_container_width=True, height=400)
