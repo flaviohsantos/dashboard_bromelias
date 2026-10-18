@@ -104,8 +104,7 @@ positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
 total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum()
 
 # ==========================================
-# ==========================================
-# TOPO: MAPAS EM ABAS E TERMÔMETRO
+# TOPO: MAPAS E TERMÔMETRO (SEM ABAS)
 # ==========================================
 import folium
 from folium.plugins import HeatMap
@@ -117,14 +116,17 @@ df_mapa = df_plantas_filtrado.dropna(subset=["latitude", "longitude"])
 plantas_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]
 ids_positivos = plantas_positivas["id_bromelia_calc"].unique() if not plantas_positivas.empty else []
 
+# Filtro para escolher o mapa na barra lateral
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 🗺️ Visualização do Mapa")
+    tipo_mapa = st.radio("Selecione o tipo de mapa:", ["Mapa Base e Raio (100m)", "Mapa de Calor"])
+
 col_mapa, col_termo = st.columns([3, 1])
 
 with col_mapa:
-    tab1, tab2 = st.tabs(["📍 Mapa Base e Raio (100m)", "🔥 Mapa de Calor"])
-
-    # --- ABA 1: MAPA BASE COM RAIO ---
-    with tab1:
-        if not df_mapa.empty:
+    if not df_mapa.empty:
+        if tipo_mapa == "Mapa Base e Raio (100m)":
             m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
             
             for _, row in df_mapa.iterrows():
@@ -134,12 +136,9 @@ with col_mapa:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>POSITIVO").add_to(m1)
                 else:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>Negativo").add_to(m1)
-            st_folium(m1, width=None, height=450, key="mapa1")
-
-    # --- ABA 2: MAPA DE CALOR ---
-    with tab2:
-        if not df_mapa.empty:
-            # Usando OpenStreetMap padrão (gratuito e sem erro de API)
+            st_folium(m1, width=None, height=500, key="mapa_base")
+            
+        elif tipo_mapa == "Mapa de Calor":
             m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
             
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
@@ -148,13 +147,14 @@ with col_mapa:
                 heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
                 HeatMap(heat_data, radius=45, blur=30, min_opacity=0.7).add_to(m2)
                 
-                # Adiciona os pinos vermelhos dentro do calor para referência
                 for _, row in df_calor.iterrows():
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red", icon="info-sign")).add_to(m2)
                     
-                st_folium(m2, width=None, height=450, key="mapa_calor_novo")
+                st_folium(m2, width=None, height=500, key="mapa_calor")
             else:
                 st.info("Nenhuma planta positiva para gerar o mapa de calor.")
+    else:
+        st.info("Sem dados de localização para exibir o mapa.")
 
 with col_termo:
     st.markdown("#### 🌡️ Termômetro de Risco")
@@ -174,6 +174,7 @@ with col_termo:
     fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
     st.plotly_chart(fig_termo, use_container_width=True)
     st.info("Reflete a % de amostras positivas para *Aedes* com base nos filtros.")
+    
 # ==========================================
 # MEIO: KPIs E MICROCLIMA
 # ==========================================
