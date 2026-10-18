@@ -59,14 +59,24 @@ if genero_sel:
 
 # Filtro de data protegido
 if len(periodo_sel) == 2 and not df_dados_filtrado.empty and "data_visita" in df_dados_filtrado.columns:
-    # Força a conversão para data
+    
+    # 1. Transforma em texto temporariamente para limpar
+    df_dados_filtrado["data_visita"] = df_dados_filtrado["data_visita"].astype(str)
+    
+    # 2. Converte para data. O 'errors="coerce"' transforma o que não for data em 'NaT' (nulo)
     df_dados_filtrado["data_visita"] = pd.to_datetime(df_dados_filtrado["data_visita"], errors="coerce")
     
-    # Filtra usando .dt.date para garantir a comparação correta
-    df_dados_filtrado = df_dados_filtrado[
-        (df_dados_filtrado["data_visita"].dt.date >= periodo_sel[0]) & 
-        (df_dados_filtrado["data_visita"].dt.date <= periodo_sel[1])
+    # 3. O SEGREDO: Só mantém as linhas onde a data NÃO for nula
+    df_filtrado_temp = df_dados_filtrado.dropna(subset=["data_visita"]).copy()
+    
+    # 4. Aplica o filtro de data apenas nos dados válidos
+    df_filtrado_temp = df_filtrado_temp[
+        (df_filtrado_temp["data_visita"].dt.date >= periodo_sel[0]) & 
+        (df_filtrado_temp["data_visita"].dt.date <= periodo_sel[1])
     ]
+    
+    # 5. Atualiza o dataframe principal com o resultado
+    df_dados_filtrado = df_filtrado_temp
 
 # 4. KPIs
 st.markdown("### 📊 Indicadores-chave")
