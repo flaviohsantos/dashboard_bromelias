@@ -82,8 +82,6 @@ with st.sidebar:
         "Selecione o mapa:", 
         ["Mapa Base e Raio (100m)", "🔥 Mapa de Calor (Apenas Focos)"]
     )
-    if st.button("🔄 Recarregar Mapa"):
-        st.rerun()
 
 df_plantas_filtrado = df_plantas.copy()
 df_dados_filtrado = df_dados.copy()
@@ -130,6 +128,7 @@ col_mapa, col_termo = st.columns([3, 1])
 with col_mapa:
     if not df_mapa.empty:
         if tipo_mapa == "Mapa Base e Raio (100m)":
+            # --- MAPA BASE ---
             m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
             
             for _, row in df_mapa.iterrows():
@@ -140,21 +139,29 @@ with col_mapa:
                 else:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>Negativo").add_to(m1)
             
-            st_folium(m1, width=None, height=500, key=f"mapa_calor_{tipo_mapa}")
+            # Key única para o mapa base
+            st_folium(m1, width=None, height=500, key="mapa_base_estatico")
             
         else:
+            # --- MAPA DE CALOR ---
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
             
             if not df_calor.empty:
-                m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="CartoDB dark_matter")
+                # Fundo escuro para o calor brilhar
+                m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=14, tiles="CartoDB dark_matter")
                 
+                # Prepara os dados (apenas latitude e longitude)
                 heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
-                HeatMap(heat_data, radius=45, blur=30, min_opacity=0.7).add_to(m2)
                 
+                # Adiciona o calor com raio bem grande para garantir visibilidade
+                HeatMap(heat_data, radius=50, blur=30, min_opacity=0.8).add_to(m2)
+                
+                # Pinos brancos para referenciar
                 for _, row in df_calor.iterrows():
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="white", icon="info-sign")).add_to(m2)
                     
-                st_folium(m2, width=None, height=500, key=f"mapa_calor_{tipo_mapa}")
+                # Key única para o mapa de calor (não conflita com o de cima)
+                st_folium(m2, width=None, height=500, key="mapa_calor_estatico")
             else:
                 st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
     else:
