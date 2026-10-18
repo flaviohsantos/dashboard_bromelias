@@ -36,20 +36,17 @@ if df_plantas.empty:
     st.stop()
 
 # --- LIMPEZA DE DADOS E AUDITORIA ---
-# 1. Limpa a coluna de resultado digitado
 if "resultado_digitado" in df_dados.columns:
     df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip()
     df_dados["resultado_digitado"] = df_dados["resultado_digitado"].replace(["nan", "none", ""], "nao_processado")
 else:
     df_dados["resultado_digitado"] = "nao_processado"
 
-# 2. Limpa a coluna de resultado real
 if "resultado_real" in df_dados.columns:
     df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
 else:
     df_dados["resultado_real"] = "Nenhum"
 
-# 3. Trava de segurança para a contagem de larvas
 if "soma_contagem" in df_dados.columns:
     df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
     df_dados.loc[df_dados["soma_contagem"] > 200, "soma_contagem"] = 0
@@ -121,7 +118,7 @@ positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
 total_especimes = pd.to_numeric(df_dados_filtrado["soma_contagem"], errors="coerce").sum()
 
 # ==========================================
-# TOPO: MAPAS E TERMÔMETRO COM CONTROLE DE ESTADO
+# TOPO: MAPAS E TERMÔMETRO
 # ==========================================
 st.markdown("### 🗺️ Mapas de Risco Georreferenciados e Termômetro")
 
@@ -306,31 +303,31 @@ with col_grafico2:
 st.markdown("---")
 st.markdown("### 📝 Notas e Intercorrências de Campo")
 if "observacoes_visita" in df_dados_filtrado.columns:
-    # Correção: Força a leitura como string e remove os "nans" invisíveis
     df_obs = df_dados_filtrado.copy()
-    df_obs["observacoes_visita"] = df_obs["observacoes_visita"].astype(str).str.strip().str.lower()
-    df_obs = df_obs[(df_obs["observacoes_visita"] != "") & (df_obs["observacoes_visita"] != "nan") & (df_obs["observacoes_visita"] != "none")]
+    df_obs["observacoes_visita"] = df_obs["observacoes_visita"].astype(str).str.strip()
+    df_obs = df_obs[(df_obs["observacoes_visita"] != "") & (df_obs["observacoes_visita"].str.lower() != "nan") & (df_obs["observacoes_visita"].str.lower() != "none")]
     
     if not df_obs.empty:
         df_obs = df_obs.drop_duplicates(subset=["id_bromelia_calc", "data_visita"])
         for _, row in df_obs.iterrows():
             data_str = pd.to_datetime(row["data_visita"]).strftime('%d/%m/%Y') if pd.notna(row["data_visita"]) else "Data não informada"
-            st.info(f"**{data_str}** | Planta **{row['id_bromelia_calc']}** (Bairro: {row['bairro']}): *\"{row['observacoes_visita'].capitalize()}\"*")
+            st.info(f"**{data_str}** | Planta **{row['id_bromelia_calc']}** (Bairro: {row['bairro']}): *\"{row['observacoes_visita']}\"*")
     else:
         st.success("✅ Nenhuma intercorrência registrada nas visitas filtradas.")
 
 # --- NOTAS DO LABORATÓRIO ---
 st.markdown("### 🔬 Notas do Laboratório")
 if "observacoes_lab" in df_dados_filtrado.columns:
-    # Correção: Força a leitura como string e remove os "nans" invisíveis
     df_lab_obs = df_dados_filtrado.copy()
-    df_lab_obs["observacoes_lab"] = df_lab_obs["observacoes_lab"].astype(str).str.strip().str.lower()
-    df_lab_obs = df_lab_obs[(df_lab_obs["observacoes_lab"] != "") & (df_lab_obs["observacoes_lab"] != "nan") & (df_lab_obs["observacoes_lab"] != "none")]
+    df_lab_obs["observacoes_lab"] = df_lab_obs["observacoes_lab"].astype(str).str.strip()
+    df_lab_obs = df_lab_obs[(df_lab_obs["observacoes_lab"] != "") & (df_lab_obs["observacoes_lab"].str.lower() != "nan") & (df_lab_obs["observacoes_lab"].str.lower() != "none")]
     
     if not df_lab_obs.empty:
         df_lab_obs = df_lab_obs.drop_duplicates(subset=["id_amostra_calc"])
         for _, row in df_lab_obs.iterrows():
-            st.warning(f"**Amostra {row['id_amostra_calc']}**: *\"{row['observacoes_lab'].capitalize()}\"*")
+            # Correção da falha de capitalize: usa str() para garantir que é texto
+            texto_obs = str(row['observacoes_lab']).capitalize()
+            st.warning(f"**Amostra {row['id_amostra_calc']}**: *\"{texto_obs}\"*")
     else:
         st.success("✅ Nenhuma observação registrada no laboratório.")
 
