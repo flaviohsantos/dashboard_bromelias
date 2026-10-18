@@ -29,7 +29,6 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
     plantas = []
     dados_tabela = []
 
-    # 1. Processa o formulário de CAMPO
     for item in lista_campo:
         id_planta = item.get("grp_cadastro/id_bromelia_calc") or "Sem ID"
         bairro = item.get("grp_cadastro/bairro") or "Não informado"
@@ -51,11 +50,10 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
             for v in visitas:
                 data_visita = v.get("rep_visitas/data_visita")
                 presenca = v.get("rep_visitas/presenca_imaturos")
-                
-                # Pega os dados físico-químicos da água
                 vol_agua = v.get("rep_visitas/volume_agua_ml")
                 temp_agua = v.get("rep_visitas/temp_agua_c")
                 ph_agua = v.get("rep_visitas/ph_agua")
+                obs_visita = v.get("rep_visitas/observacoes_visita") # NOVO: Observações
                 
                 amostras = v.get("rep_visitas/rep_amostras", [])
                 if isinstance(amostras, list) and len(amostras) > 0:
@@ -64,27 +62,28 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                             "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero,
                             "data_visita": data_visita, "presenca_imaturos": presenca,
                             "id_amostra_calc": a.get("rep_visitas/rep_amostras/id_amostra_calc"),
-                            "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua
+                            "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua,
+                            "observacoes_visita": obs_visita # NOVO
                         })
                 else:
                     dados_tabela.append({
                         "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero,
                         "data_visita": data_visita, "presenca_imaturos": presenca,
                         "id_amostra_calc": None,
-                        "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua
+                        "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua,
+                        "observacoes_visita": obs_visita # NOVO
                     })
 
-    # 2. Processa o formulário de LABORATÓRIO
     lab_especies = []
     for item in lista_lab:
         id_amostra = item.get("grp_amostra/id_amostra_lab") or "Sem ID"
         resultado_digitado = item.get("grp_resultado/resultado_amostra") or "nao_processado"
+        obs_lab = item.get("observacoes_lab") or item.get("grp_resultado/observacoes_lab") # NOVO: Observações do Lab
         
         especies = item.get("rep_especies", [])
         if isinstance(especies, list):
             for e in especies:
                 especie_bruta = e.get("rep_especies/especie_identificada") or "nao_identificado"
-                # FORÇA O PADRÃO: Tudo minúsculo e com underline
                 especie_formatada = str(especie_bruta).lower().strip().replace(" ", "_")
                 
                 if "aedes" in especie_formatada:
@@ -97,15 +96,16 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                     "especie_identificada": especie_formatada,
                     "soma_contagem": e.get("rep_especies/soma_contagem") or 0,
                     "resultado_digitado": resultado_digitado,
-                    "resultado_real": resultado_real
+                    "resultado_real": resultado_real,
+                    "observacoes_lab": obs_lab # NOVO
                 })
     
     df_plantas = pd.DataFrame(plantas)
     df_dados = pd.DataFrame(dados_tabela) if dados_tabela else pd.DataFrame(columns=[
         "id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", 
-        "id_amostra_calc", "volume_agua_ml", "temp_agua_c", "ph_agua"
+        "id_amostra_calc", "volume_agua_ml", "temp_agua_c", "ph_agua", "observacoes_visita"
     ])
-    df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real"])
+    df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real", "observacoes_lab"])
 
     if not df_dados.empty and "id_amostra_calc" in df_dados.columns:
         df_final = df_dados.merge(df_lab, on="id_amostra_calc", how="left")
@@ -115,5 +115,6 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
         df_final["soma_contagem"] = None
         df_final["resultado_digitado"] = None
         df_final["resultado_real"] = None
+        df_final["observacoes_lab"] = None
 
     return df_plantas, df_final
