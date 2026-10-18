@@ -114,7 +114,7 @@ col_mapa, col_termometro = st.columns([2.5, 1])
 with col_mapa:
     if not df_mapa.empty:
         # Mapa base
-        m = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="CartoDB positron")
+        m = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
 
         # Encontra plantas positivas
         plantas_positivas = df_dados_filtrado[df_dados_filtrado["resultado_real"] == "Positivo (Aedes)"]
