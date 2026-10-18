@@ -29,21 +29,14 @@ if df_plantas.empty:
     st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# 2. Filtros
+# 2. Filtros (Apenas Bairro e Gênero)
 st.sidebar.header("🔎 Filtros")
 
-# Filtro de Bairro
 bairros = sorted(df_plantas["bairro"].dropna().unique())
 bairro_sel = st.sidebar.multiselect("Bairro", bairros, default=bairros)
 
-# Filtro de Gênero
 generos = sorted(df_plantas["genero"].dropna().unique())
 genero_sel = st.sidebar.multiselect("Gênero da bromélia", generos, default=generos)
-
-# Filtro de Data
-data_padrao_inicio = pd.Timestamp.today().date() - pd.Timedelta(days=30)
-data_padrao_fim = pd.Timestamp.today().date()
-periodo_sel = st.sidebar.date_input("Período (Data da Visita)", value=(data_padrao_inicio, data_padrao_fim))
 
 # 3. Aplicar filtros
 df_plantas_filtrado = df_plantas.copy()
@@ -56,19 +49,6 @@ if bairro_sel:
 if genero_sel:
     df_plantas_filtrado = df_plantas_filtrado[df_plantas_filtrado["genero"].isin(genero_sel)]
     df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["genero"].isin(genero_sel)]
-
-# Filtro de data protegido
-if len(periodo_sel) == 2 and not df_dados_filtrado.empty and "data_visita" in df_dados_filtrado.columns:
-    df_dados_filtrado["data_visita"] = pd.to_datetime(df_dados_filtrado["data_visita"], errors="coerce")
-    
-    df_filtrado_temp = df_dados_filtrado.dropna(subset=["data_visita"]).copy()
-    
-    df_filtrado_temp = df_filtrado_temp[
-        (df_filtrado_temp["data_visita"].dt.date >= periodo_sel[0]) & 
-        (df_filtrado_temp["data_visita"].dt.date <= periodo_sel[1])
-    ]
-    
-    df_dados_filtrado = df_filtrado_temp
 
 # 4. KPIs
 st.markdown("### 📊 Indicadores-chave")
@@ -104,20 +84,25 @@ if not df_mapa.empty:
 else:
     st.info("Nenhuma planta encontrada com os filtros selecionados.")
 
-# 6. Série temporal
+# 6. Série temporal (por Mês)
 st.markdown("### 📈 Série temporal de coletas")
 if "data_visita" in df_dados_filtrado.columns and not df_dados_filtrado.empty:
     df_serie = df_dados_filtrado.dropna(subset=["data_visita"]).copy()
     if not df_serie.empty:
+        # Converte a data para o formato do Pandas
+        df_serie["data_visita"] = pd.to_datetime(df_serie["data_visita"], errors="coerce")
+        # Agrupa por Mês/Ano
         df_serie["mes"] = df_serie["data_visita"].dt.to_period("M").astype(str)
+        
         contagem = df_serie.groupby("mes").agg(visitas=("data_visita", "count"), amostras=("id_amostra_calc", "count")).reset_index()
+        
         fig = go.Figure()
         fig.add_trace(go.Bar(x=contagem["mes"], y=contagem["visitas"], name="Visitas", marker_color="#2E86AB"))
         fig.add_trace(go.Bar(x=contagem["mes"], y=contagem["amostras"], name="Amostras", marker_color="#E63946"))
         fig.update_layout(barmode="group", height=400)
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Sem visitas no período.")
+        st.info("Sem dados de visita para gerar o gráfico.")
 
 # 7. Gráficos
 col_a, col_b = st.columns(2)
@@ -135,7 +120,7 @@ with col_b:
         cont.columns = ["bairro", "quantidade"]
         st.plotly_chart(px.bar(cont, x="quantidade", y="bairro", orientation="h", color="quantidade"), use_container_width=True)
 
-# 8. Tabela
+# 8. Tabela Consolidada
 st.markdown("### 📋 Tabela consolidada")
 colunas_uteis = ["id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", "id_amostra_calc", "especie_identificada", "resultado_amostra"]
 colunas_existentes = [c for c in colunas_uteis if c in df_dados_filtrado.columns]
