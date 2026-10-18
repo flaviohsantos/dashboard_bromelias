@@ -121,9 +121,11 @@ col_mapa, col_termo = st.columns([3, 1])
 with col_mapa:
     tab1, tab2 = st.tabs(["📍 Mapa Base e Raio (100m)", "🔥 Mapa de Calor"])
 
+    # --- ABA 1: MAPA BASE COM RAIO ---
     with tab1:
         if not df_mapa.empty:
             m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
+            
             for _, row in df_mapa.iterrows():
                 tem_risco = row["id_bromelia_calc"] in ids_positivos
                 if tem_risco:
@@ -133,16 +135,27 @@ with col_mapa:
                     folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia_calc']}</b><br>Negativo").add_to(m1)
             st_folium(m1, width=None, height=450, key="mapa1")
 
+    # --- ABA 2: MAPA DE CALOR ---
     with tab2:
         if not df_mapa.empty:
-            m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="OpenStreetMap")
+            # MUDANÇA: Fundo escuro estável para o calor brilhar mais
+            m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="CartoDB dark_matter")
+            
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
+            
             if not df_calor.empty:
                 heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
-                HeatMap(heat_data, radius=40, blur=25, min_opacity=0.8).add_to(m2)
+                # Aumentando o raio e opacidade para garantir visibilidade
+                HeatMap(heat_data, radius=45, blur=30, min_opacity=0.7).add_to(m2)
+                
+                # Adiciona pinos brancos por cima para dar referência
                 for _, row in df_calor.iterrows():
-                    folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red", icon="info-sign")).add_to(m2)
-                st_folium(m2, width=None, height=450, key="mapa2")
+                    folium.Marker(
+                        location=[row["latitude"], row["longitude"]],
+                        icon=folium.Icon(color="white", icon="info-sign")
+                    ).add_to(m2)
+                    
+                st_folium(m2, width=None, height=450, key="mapa_calor_novo")
             else:
                 st.info("Nenhuma planta positiva para gerar o mapa de calor.")
 
@@ -175,7 +188,7 @@ c2.metric("Visitas", n_visitas)
 c3.metric("Amostras", n_amostras)
 c4.metric("Espécimes (Lab)", int(total_especimes))
 
-# --- NOVO: MICROCLIMA E AMBIENTE (Inspirado no colega) ---
+# --- MICROCLIMA E AMBIENTE ---
 st.markdown("#### 🌡️ Resumo do Microclima e Ambiente")
 if not df_dados_filtrado.empty:
     colunas_agua = ["ph_agua", "temp_agua_c", "volume_agua_ml"]
@@ -192,12 +205,11 @@ if not df_dados_filtrado.empty:
     m2.metric("Temperatura Média", f"{media_temp:.1f} °C" if pd.notna(media_temp) else "—")
     m3.metric("Volume Médio", f"{media_vol:.0f} mL" if pd.notna(media_vol) else "—")
     
-    # Porcentagem de bromélias com água
     pct_agua = (df_dados_filtrado["presenca_imaturos"].notna().sum() / len(df_dados_filtrado) * 100) if len(df_dados_filtrado) > 0 else 0
     m4.metric("Bromélias com Água", f"{pct_agua:.1f}%")
 
 # ==========================================
-# SÉRIE TEMPORAL COM PICO (Inspirado no colega)
+# SÉRIE TEMPORAL COM PICO
 # ==========================================
 st.markdown("---")
 st.markdown("### 📈 Série temporal de coletas")
@@ -208,7 +220,6 @@ if "data_visita" in df_dados_filtrado.columns and not df_dados_filtrado.empty:
         df_serie["mes"] = df_serie["data_visita"].dt.to_period("M").astype(str)
         contagem = df_serie.groupby("mes").agg(visitas=("data_visita", "count"), amostras=("id_amostra_calc", "nunique")).reset_index()
         
-        # Encontra o pico
         if not contagem.empty:
             pico = contagem.loc[contagem["amostras"].idxmax()]
             st.info(f"🏆 **Pico de Coletas:** O mês com mais amostras foi **{pico['mes']}** com **{pico['amostras']}** amostras coletadas.")
@@ -294,25 +305,22 @@ with col_grafico2:
     else:
         st.info("Sem dados de volume/temperatura.")
 
-# --- NOVO: NOTAS E INTERCORRÊNCIAS DE CAMPO ---
+# --- NOTAS E INTERCORRÊNCIAS DE CAMPO ---
 st.markdown("---")
 st.markdown("### 📝 Notas e Intercorrências de Campo")
 if "observacoes_visita" in df_dados_filtrado.columns:
-    # Filtra apenas as observações que não estão vazias
     df_obs = df_dados_filtrado.dropna(subset=["observacoes_visita"]).copy()
     df_obs = df_obs[df_obs["observacoes_visita"].astype(str).str.strip() != ""]
     
     if not df_obs.empty:
-        # Remove duplicatas da mesma visita
         df_obs = df_obs.drop_duplicates(subset=["id_bromelia_calc", "data_visita"])
-        
         for _, row in df_obs.iterrows():
             data_str = pd.to_datetime(row["data_visita"]).strftime('%d/%m/%Y') if pd.notna(row["data_visita"]) else "Data não informada"
             st.info(f"**{data_str}** | Planta **{row['id_bromelia_calc']}** (Bairro: {row['bairro']}): *\"{row['observacoes_visita']}\"*")
     else:
         st.success("✅ Nenhuma intercorrência registrada nas visitas filtradas.")
 
-# --- NOVO: NOTAS DO LABORATÓRIO ---
+# --- NOTAS DO LABORATÓRIO ---
 st.markdown("### 🔬 Notas do Laboratório")
 if "observacoes_lab" in df_dados_filtrado.columns:
     df_lab_obs = df_dados_filtrado.dropna(subset=["observacoes_lab"]).copy()
@@ -323,8 +331,7 @@ if "observacoes_lab" in df_dados_filtrado.columns:
         for _, row in df_lab_obs.iterrows():
             st.warning(f"**Amostra {row['id_amostra_calc']}**: *\"{row['observacoes_lab']}\"*")
     else:
-        st.success("✅ Nenhuma observação registrada no laboratório para as amostras filtradas.")
-
+        st.success("✅ Nenhuma observação registrada no laboratório.")
 
 # 9. Tabela Consolidada (Movida para o final)
 st.markdown("---")
