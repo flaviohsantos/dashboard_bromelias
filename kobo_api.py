@@ -53,30 +53,40 @@ def carregar_dados():
     return df_campo, df_lab
 
 def achatar_repeats(df: pd.DataFrame) -> pd.DataFrame:
-    """Achata listas aninhadas de forma segura usando explode."""
+    """Achata listas aninhadas de forma segura usando loop (sem json_normalize)."""
     if df.empty:
         return df
 
-    df_out = df.copy()
+    colunas_repeat = [c for c in df.columns if df[c].apply(lambda x: isinstance(x, list)).any()]
+
+    if not colunas_repeat:
+        return df
+
+    df_expandido = df.copy()
     
-    # Encontra colunas que são listas
-    colunas_repeat = [c for c in df_out.columns if df_out[c].apply(lambda x: isinstance(x, list)).any()]
-
     for col in colunas_repeat:
-        # Substitui None/NaN por lista vazia para não quebrar o explode
-        df_out[col] = df_out[col].apply(lambda x: x if isinstance(x, list) else [])
+        novas_linhas = []
         
-        # Explode a lista (cada item vira uma linha)
-        df_exp = df_out.explode(col)
-        
-        # Normaliza os dicionários resultantes
-        expandido = pd.json_normalize(df_exp[col])
-        expandido.columns = [f"{col}/{c}" for c in expandido.columns]
-        
-        # Junta os dados originais com os novos
-        df_out = pd.concat([df_exp.drop(columns=[col]).reset_index(drop=True), expandido.reset_index(drop=True)], axis=1)
+        for _, row in df_expandido.iterrows():
+            row_dict = row.to_dict()
+            lista_itens = row_dict.pop(col, None)
+            
+            # Se a lista for vazia ou inválida (None/NaN), mantém a linha original
+            if not isinstance(lista_itens, list) or len(lista_itens) == 0:
+                novas_linhas.append(row_dict)
+                continue
+                
+            # Se for lista, expande cada item
+            for item in lista_itens:
+                nova_linha = row_dict.copy()
+                if isinstance(item, dict):
+                    for k, v in item.items():
+                        nova_linha[f"{col}/{k}"] = v
+                novas_linhas.append(nova_linha)
+                
+        df_expandido = pd.DataFrame(novas_linhas)
 
-    return df_out
+    return df_expandido
 
 def preparar_campo(df_campo: pd.DataFrame) -> pd.DataFrame:
     if df_campo.empty:
@@ -117,7 +127,7 @@ def cruzar_campo_lab(df_campo: pd.DataFrame, df_lab: pd.DataFrame) -> pd.DataFra
     elif "grp_amostra/id_amostra_lab" in df_lab.columns:
         col_lab = "grp_amostra/id_amostra_lab"
     else:
-        # Se não achou, tenta pegar pelo nome do label
+        # Se não achou, tenta pegar pelo nome do label (como está no seu Excel)
         colunas_possiveis = [c for c in df_lab.columns if "Código da amostra" in c]
         if colunas_possiveis:
             col_lab = colunas_possiveis[0]
