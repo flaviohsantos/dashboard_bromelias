@@ -138,17 +138,20 @@ with col_mapa:
     # --- ABA 2: MAPA DE CALOR ---
     with tab2:
         if not df_mapa.empty:
-            # MUDANÇA: Fundo escuro estável para o calor brilhar mais
-            m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=13, tiles="CartoDB dark_matter")
+            # CORREÇÃO: Usando Stadia Alidade Smooth Dark (Gratuito e Estável)
+            m2 = folium.Map(
+                location=[-22.9661, -42.0272], 
+                zoom_start=13, 
+                tiles="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png",
+                attr="&copy; Stadia Maps"
+            )
             
             df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
             
             if not df_calor.empty:
                 heat_data = [[row["latitude"], row["longitude"]] for index, row in df_calor.iterrows()]
-                # Aumentando o raio e opacidade para garantir visibilidade
                 HeatMap(heat_data, radius=45, blur=30, min_opacity=0.7).add_to(m2)
                 
-                # Adiciona pinos brancos por cima para dar referência
                 for _, row in df_calor.iterrows():
                     folium.Marker(
                         location=[row["latitude"], row["longitude"]],
