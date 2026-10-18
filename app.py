@@ -36,7 +36,7 @@ if "resultado_real" in df_dados.columns:
 else:
     df_dados["resultado_real"] = "Nenhum"
 
-# TRAVA: Se a quantidade de larvas for maior que 200, assume que é erro de digitação e zera.
+# TRAVA: Se a quantidade de larvas for maior que 200, assume que é erro e zera.
 if "soma_contagem" in df_dados.columns:
     df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
     df_dados.loc[df_dados["soma_contagem"] > 200, "soma_contagem"] = 0
@@ -78,7 +78,7 @@ if genero_sel:
     df_plantas_filtrado = df_plantas_filtrado[df_plantas_filtrado["genero"].isin(genero_sel)]
     df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["genero"].isin(genero_sel)]
 
-# --- FORMATAÇÃO DE NOMES (Sem asteriscos para não sujar a tabela) ---
+# --- FORMATAÇÃO DE NOMES ---
 if "especie_identificada" in df_dados_filtrado.columns:
     df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
         lambda x: f"{str(x).replace('_', ' ').capitalize()}" if pd.notna(x) else "Não informado"
@@ -153,11 +153,7 @@ with col_esq:
             color="especie_display", 
             color_discrete_sequence=px.colors.qualitative.Pastel
         )
-        fig_esp.update_layout(
-            showlegend=False, 
-            xaxis_title="", 
-            yaxis_title="Qtd. de Espécimes"
-        )
+        fig_esp.update_layout(showlegend=False, xaxis_title="", yaxis_title="Qtd. de Espécimes")
         st.plotly_chart(fig_esp, use_container_width=True)
 
 with col_dir:
@@ -173,7 +169,6 @@ with col_dir:
         df_tabela = df_especies_counts.rename(columns={"especie_display": "Espécie", "Total_Larvas": "Total Larvas", "Amostras": "Nº Amostras", "Percentual (%)": "Percentual"})
         linha_total = pd.DataFrame([{"Espécie": "TOTAL GERAL", "Total Larvas": total_geral, "Nº Amostras": df_especies_counts["Amostras"].sum(), "Percentual": "100%"}])
         df_tabela = pd.concat([df_tabela, linha_total], ignore_index=True)
-        
         st.dataframe(df_tabela, hide_index=True, use_container_width=True)
 
 # 8. Gráficos Gerais
@@ -209,3 +204,68 @@ if not df_dados_filtrado.empty and colunas_existentes:
     })
     df_exibicao["Gênero"] = df_exibicao["Gênero"].apply(lambda x: f"{str(x).capitalize()}")
     st.dataframe(df_exibicao, use_container_width=True, height=400)
+
+# --- 10. ANÁLISE DA ÁGUA E CORRELAÇÃO COM IMATUROS ---
+st.markdown("---")
+st.markdown("### 💧 Análise Físico-Química da Água (Fatores de Risco)")
+
+colunas_agua = ["ph_agua", "temp_agua_c", "volume_agua_ml"]
+for col in colunas_agua:
+    if col in df_dados_filtrado.columns:
+        df_dados_filtrado[col] = pd.to_numeric(df_dados_filtrado[col], errors="coerce")
+
+df_agua = df_dados_filtrado.dropna(subset=["ph_agua", "presenca_imaturos"]).copy()
+df_agua["status_imatur"] = df_agua["presenca_imaturos"].map({"presenca": "Com Larvas", "ausencia": "Sem Larvas"})
+df_agua = df_agua[df_agua["status_imatur"].isin(["Com Larvas", "Sem Larvas"])]
+
+col_grafico1, col_grafico2 = st.columns(2)
+
+with col_grafico1:
+    st.markdown("#### 🧪 pH da Água vs. Presença de Larvas")
+    if not df_agua.empty and df_agua["ph_agua"].notna().any():
+        fig_ph = px.box(
+            df_agua, x="status_imatur", y="ph_agua", color="status_imatur", points="all",
+            color_discrete_map={"Com Larvas": "#E63946", "Sem Larvas": "#2E86AB"},
+            labels={"status_imatur": "Status", "ph_agua": "pH da Água"}
+        )
+        fig_ph.update_layout(showlegend=False)
+        st.plotly_chart(fig_ph, use_container_width=True)
+    else:
+        st.info("As visitas registradas não possuem valores de pH preenchidos.")
+
+with col_grafico2:
+    st.markdown("#### 🌡️ Temperatura x Volume de Água")
+    df_temp = df_dados_filtrado.dropna(subset=["temp_agua_c", "volume_agua_ml", "presenca_imaturos"]).copy()
+    df_temp["status_imatur"] = df_temp["presenca_imaturos"].map({"presenca": "Com Larvas", "ausencia": "Sem Larvas"})
+    
+    if not df_temp.empty:
+        fig_vol = px.scatter(
+            df_temp, x="volume_agua_ml", y="temp_agua_c", color="status_imatur",
+            size="volume_agua_ml", hover_data=["id_bromelia_calc"],
+            color_discrete_map={"Com Larvas": "#E63946", "Sem Larvas": "#2E86AB"},
+            labels={"volume_agua_ml": "Volume (mL)", "temp_agua_c": "Temperatura (°C)", "status_imatur": "Status"}
+        )
+        st.plotly_chart(fig_vol, use_container_width=True)
+    else:
+        st.info("As visitas registradas não possuem volume e temperatura preenchidos.")
+
+st.markdown("#### 📊 Resumo por Faixa de pH")
+if not df_agua.empty and df_agua["ph_agua"].notna().any():
+    def categorizar_ph(ph):
+        if pd.isna(ph): return "Não medido"
+        elif ph < 6.0: return "Ácido (< 6.0)"
+        elif 6.0 <= ph <= 7.5: return "Neutro (6.0 - 7.5)"
+        else: return "Alcalino (> 7.5)"
+
+    df_agua["faixa_ph"] = df_agua["ph_agua"].apply(categorizar_ph)
+    resumo_ph = df_agua.groupby(["faixa_ph", "status_imatur"]).size().unstack(fill_value=0).reset_index()
+    
+    if "Com Larvas" not in resumo_ph.columns: resumo_ph["Com Larvas"] = 0
+    if "Sem Larvas" not in resumo_ph.columns: resumo_ph["Sem Larvas"] = 0
+        
+    resumo_ph["Total"] = resumo_ph["Com Larvas"] + resumo_ph["Sem Larvas"]
+    resumo_ph["% Positivo"] = (resumo_ph["Com Larvas"] / resumo_ph["Total"] * 100).round(1).astype(str) + "%"
+    
+    st.dataframe(resumo_ph, hide_index=True, use_container_width=True)
+else:
+    st.info("Não há dados de pH suficientes para criar a tabela de faixas.")
