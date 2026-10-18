@@ -72,7 +72,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                             "id_bromelia_calc": id_planta,
                             "bairro": bairro,
                             "genero": genero,
-                            "data_visita": data_visita,
+                            "data_visita": pd.to_datetime(data_visita).date() if data_visita else None,
                             "presenca_imaturos": presenca,
                             "id_amostra_calc": a.get("id_amostra_calc")
                         })
@@ -82,7 +82,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                         "id_bromelia_calc": id_planta,
                         "bairro": bairro,
                         "genero": genero,
-                        "data_visita": data_visita,
+                        "data_visita": pd.to_datetime(data_visita).date() if data_visita else None,
                         "presenca_imaturos": presenca,
                         "id_amostra_calc": None
                     })
