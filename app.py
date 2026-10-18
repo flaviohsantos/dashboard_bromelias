@@ -59,7 +59,10 @@ if genero_sel:
 
 # Filtro de data protegido
 if len(periodo_sel) == 2 and not df_dados_filtrado.empty and "data_visita" in df_dados_filtrado.columns:
+    # Força a conversão para data
     df_dados_filtrado["data_visita"] = pd.to_datetime(df_dados_filtrado["data_visita"], errors="coerce")
+    
+    # Filtra usando .dt.date para garantir a comparação correta
     df_dados_filtrado = df_dados_filtrado[
         (df_dados_filtrado["data_visita"].dt.date >= periodo_sel[0]) & 
         (df_dados_filtrado["data_visita"].dt.date <= periodo_sel[1])
