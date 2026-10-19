@@ -19,16 +19,14 @@ st.markdown("🚀 **Versão do App: 2.0 (Diagnóstico)**")
 
   # --- CABEÇALHO ---
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
-st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | **Contato:**
-  fhsantos@gmail.com")
-fhsantos@gmail.com")
-  st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
-  st.markdown("---")
+st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | **Contato:**fhsantos@gmail.com")
+st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
+st.markdown("---")
 
   # --- CARREGAMENTO COM DIAGNÓSTICO ---
-  st.info("🔍 Iniciando processo de conexão com Kobo Toolbox...")
+st.info("🔍 Iniciando processo de conexão com Kobo Toolbox...")
 
-  try:
+try:
       base_url = kobo_api._get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
       token = kobo_api._get_secret("KOBO_TOKEN")
       uid_campo = kobo_api._get_secret("UID_CAMPO")
