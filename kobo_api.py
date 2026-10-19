@@ -33,7 +33,6 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
         bairro = item.get("grp_cadastro/bairro") or "Não informado"
         genero = item.get("grp_cadastro/genero") or "Não informado"
         
-        # Extrai lat/lon
         geo = item.get("grp_cadastro/geolocalizacao", "")
         lat, lon = None, None
         if isinstance(geo, str) and " " in geo:
@@ -89,7 +88,6 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
 
                 resultado_real = "Positivo (Aedes)" if "aedes" in especie else "Negativo (Outros)"
 
-                # Guarda a primeira espécie encontrada (ou a última, não importa muito para o merge básico)
                 lab_dict[id_amostra] = {
                     "especie_identificada": especie,
                     "soma_contagem": soma_contagem,
@@ -98,26 +96,21 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                     "observacoes_lab": obs_lab
                 }
 
-    # 3. Junta os dados sem usar merge do pandas (mais seguro)
+    # 3. Junta os dados sem usar merge do pandas
     for d in dados:
         id_am = d.get("id_amostra_calc")
         if id_am in lab_dict:
-            lab_info = lab_dict[id_am]
-            d["especie_identificada"] = lab_info["especie_identificada"]
-            d["soma_contagem"] = lab_info["soma_contagem"]
-            d["resultado_digitado"] = lab_info["resultado_digitado"]
-            d["resultado_real"] = lab_info["resultado_real"]
-            d["observacoes_lab"] = lab_info["observacoes_lab"]
+            d.update(lab_dict[id_am])
         else:
-            d["especie_identificada"] = None
-            d["soma_contagem"] = 0
-            d["resultado_digitado"] = "nao_processado"
-            d["resultado_real"] = "Nenhum"
-            d["observacoes_lab"] = None
+            d.update({
+                "especie_identificada": None,
+                "soma_contagem": 0,
+                "resultado_digitado": "nao_processado",
+                "resultado_real": "Nenhum",
+                "observacoes_lab": None
+            })
 
-    df_final = pd.DataFrame(dados)
-    
-    # Retorna também um df_plantas simulado (opcional para o app, mas o app precisa)
+    df_final = pd.DataFrame(dados) if dados else pd.DataFrame()
     df_plantas = df_final[["id_bromelia_calc", "bairro", "genero", "latitude", "longitude"]].drop_duplicates(subset=["id_bromelia_calc"]) if not df_final.empty else pd.DataFrame()
 
     return df_plantas, df_final
