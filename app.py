@@ -6,12 +6,15 @@ import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from kobo_api import _get_secret, baixar_formulario, preparar_dados_completos
+from datetime import datetime
 
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 
-# Título simples (sem HTML que possa quebrar a página)
+# --- CABEÇALHO ---
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
-st.caption("Pesquisador: Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | Contato: fhsantos@gmail.com")
+st.markdown(f"**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | **Contato:** fhsantos@gmail.com")
+st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
+st.markdown("---")
 
 # --- CARREGAMENTO ---
 base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
@@ -19,7 +22,7 @@ token = _get_secret("KOBO_TOKEN")
 uid_campo = _get_secret("UID_CAMPO")
 uid_lab = _get_secret("UID_LAB")
 
-with st.spinner("Baixando dados..."):
+with st.spinner("Baixando dados do Kobo..."):
     lista_campo = baixar_formulario(uid_campo, token, base_url)
     lista_lab = baixar_formulario(uid_lab, token, base_url)
     df_plantas, df_dados = preparar_dados_completos(lista_campo, lista_lab)
@@ -86,7 +89,7 @@ positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
 total_especimes = df_dados_filtrado["soma_contagem"].sum()
 
 # --- MAPAS ---
-st.markdown("### 🗺️ Mapas e Termômetro")
+st.markdown("### 🗺️ Mapas de Risco e Termômetro")
 df_mapa = df_plantas_filtrado.dropna(subset=["latitude", "longitude"])
 ids_positivos = amostras_com_aedes["id_bromelia_calc"].unique()
 
