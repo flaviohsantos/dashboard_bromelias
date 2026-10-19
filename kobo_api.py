@@ -78,6 +78,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
     lab_especies = []
     for item in lista_lab:
         id_amostra = item.get("grp_amostra/id_amostra_lab") or item.get("id_amostra_lab")
+        id_amostra = str(id_amostra).strip() if id_amostra else None
         if not id_amostra: continue
             
         resultado_digitado = item.get("grp_resultado/resultado_amostra") or "nao_processado"
