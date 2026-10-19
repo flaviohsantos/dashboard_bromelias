@@ -7,7 +7,6 @@ from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from datetime import datetime
 
-# Importação segura
 import kobo_api
 
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
@@ -34,43 +33,17 @@ if df_plantas.empty:
     st.stop()
 
 # --- TRATAMENTO ---
-try:
-    df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip().replace(["nan", "none", ""], "nao_processado")
-    df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
-    df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
-    df_dados.loc[df_dados["soma_contagem"] > 200, "soma_contagem"] = 0
-except Exception as e:
-    st.error(f"Erro no tratamento de dados: {e}")
+df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip().replace(["nan", "none", ""], "nao_processado")
+df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
 
 # --- MENU LATERAL ---
 with st.sidebar:
-    st.markdown("### 🚨 Auditoria")
-    try:
-        df_erros = df_dados[
-            ((df_dados["resultado_real"] == "Positivo (Aedes)") & (df_dados["resultado_digitado"] == "negativo")) |
-            ((df_dados["resultado_real"] == "Negativo (Outros)") & (df_dados["resultado_digitado"] == "positivo"))
-        ].copy()
-        
-        if not df_erros.empty:
-            st.error(f"⚠️ Encontrados **{len(df_erros)}** erros.")
-            for idx, row in df_erros.iterrows():
-                with st.expander(f"🔍 Amostra {row['id_amostra_calc']}"):
-                    st.write(f"**Espécie:** {str(row['especie_identificada']).replace('_', ' ').capitalize()}")
-        else:
-            st.success("✅ Nenhum erro de seleção.")
-    except Exception:
-        st.info("Aguardando dados para auditoria.")
-
-    st.markdown("---")
     st.header("🔎 Filtros")
-    try:
-        bairros = sorted(df_plantas["bairro"].dropna().unique())
-        bairro_sel = st.multiselect("Bairro", bairros, default=bairros)
-        generos = sorted(df_plantas["genero"].dropna().unique())
-        genero_sel = st.multiselect("Gênero", generos, default=generos)
-    except Exception:
-        bairro_sel, genero_sel = [], []
-
+    bairros = sorted(df_plantas["bairro"].dropna().unique())
+    bairro_sel = st.multiselect("Bairro", bairros, default=bairros)
+    generos = sorted(df_plantas["genero"].dropna().unique())
+    genero_sel = st.multiselect("Gênero", generos, default=generos)
+    
     st.markdown("---")
     st.markdown("### 🗺️ Mapa")
     tipo_mapa = st.radio("Selecione:", ["Mapa Base e Raio (100m)", "🔥 Mapa de Calor"])
@@ -99,7 +72,7 @@ amostras_positivas = amostras_com_aedes["id_amostra_calc"].nunique()
 positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
 total_especimes = df_dados_filtrado["soma_contagem"].sum()
 
-# --- KPIs (Sempre visíveis) ---
+# --- KPIs ---
 st.markdown("### 📊 Indicadores")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Plantas", n_plantas)
@@ -109,7 +82,7 @@ c4.metric("Espécimes (Lab)", int(total_especimes))
 
 st.markdown("---")
 
-# --- MAPAS (Blindados) ---
+# --- MAPAS E TERMÔMETRO ---
 st.markdown("### 🗺️ Mapas de Risco e Termômetro")
 df_mapa = df_plantas_filtrado.dropna(subset=["latitude", "longitude"])
 ids_positivos = amostras_com_aedes["id_bromelia_calc"].unique()
@@ -117,94 +90,60 @@ ids_positivos = amostras_com_aedes["id_bromelia_calc"].unique()
 col_mapa, col_termo = st.columns([3, 1])
 
 with col_mapa:
-    try:
-        if not df_mapa.empty:
-            if tipo_mapa == "Mapa Base e Raio (100m)":
-                m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
-                for _, row in df_mapa.iterrows():
-                    if row["id_bromelia_calc"] in ids_positivos:
-                        folium.Circle(location=[row["latitude"], row["longitude"]], radius=100, color="#E63946", fill=True, fill_opacity=0.2, weight=2).add_to(m1)
-                        folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red"), popup=f"{row['id_bromelia_calc']}").add_to(m1)
-                    else:
-                        folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue"), popup=f"{row['id_bromelia_calc']}").add_to(m1)
-                st_folium(m1, width=None, height=500, key="mapa1")
-            else:
-                df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
-                if not df_calor.empty:
-                    m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=14, tiles="OpenStreetMap")
-                    heat_data = [[r["latitude"], r["longitude"]] for _, r in df_calor.iterrows()]
-                    HeatMap(heat_data, radius=50, blur=30).add_to(m2)
-                    st_folium(m2, width=None, height=500, key="mapa2")
+    if not df_mapa.empty:
+        if tipo_mapa == "Mapa Base e Raio (100m)":
+            m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
+            for _, row in df_mapa.iterrows():
+                if row["id_bromelia_calc"] in ids_positivos:
+                    folium.Circle(location=[row["latitude"], row["longitude"]], radius=100, color="#E63946", fill=True, fill_opacity=0.2, weight=2).add_to(m1)
+                    folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red"), popup=f"{row['id_bromelia_calc']}").add_to(m1)
                 else:
-                    st.info("Nenhum foco positivo para gerar o mapa de calor.")
+                    folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue"), popup=f"{row['id_bromelia_calc']}").add_to(m1)
+            st_folium(m1, width=None, height=500, key="mapa1")
         else:
-            st.info("Sem dados de coordenadas para exibir o mapa.")
-    except Exception as e:
-        st.error(f"Erro ao carregar o mapa: {e}")
+            df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
+            if not df_calor.empty:
+                m2 = folium.Map(location=[-22.9661, -42.0272], zoom_start=14, tiles="OpenStreetMap")
+                heat_data = [[r["latitude"], r["longitude"]] for _, r in df_calor.iterrows()]
+                HeatMap(heat_data, radius=50, blur=30).add_to(m2)
+                st_folium(m2, width=None, height=500, key="mapa2")
+            else:
+                st.info("Nenhum foco positivo para gerar o mapa de calor.")
+    else:
+        st.info("Sem coordenadas para o mapa.")
 
 with col_termo:
-    try:
-        st.markdown("#### 🌡️ Termômetro")
-        if positividade < 15: cor, st_risco = "#2E86AB", "BAIXO"
-        elif positividade < 40: cor, st_risco = "#F4A261", "MÉDIO"
-        else: cor, st_risco = "#E63946", "ALTO"
+    st.markdown("#### 🌡️ Termômetro")
+    if positividade < 15: cor, st_risco = "#2E86AB", "BAIXO"
+    elif positividade < 40: cor, st_risco = "#F4A261", "MÉDIO"
+    else: cor, st_risco = "#E63946", "ALTO"
 
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number", value=positividade, number={'suffix': "%"},
-            title={'text': st_risco},
-            gauge={'axis': {'range': [0, 100]}, 'bar': {'color': cor},
-                   'steps': [{'range': [0, 15], 'color': '#D6EAF8'}, {'range': [15, 40], 'color': '#FDEBD0'}, {'range': [40, 100], 'color': '#FADBD8'}]}
-        ))
-        fig.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10))
-        st.plotly_chart(fig, width='stretch')
-    except Exception as e:
-        st.error(f"Erro no termômetro: {e}")
-
-# --- MICROCLIMA ---
-st.markdown("#### 🌡️ Microclima")
-try:
-    if not df_dados_filtrado.empty:
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("pH Médio", f"{df_dados_filtrado['ph_agua'].astype(float).mean():.2f}")
-        m2.metric("Temp. Média", f"{df_dados_filtrado['temp_agua_c'].astype(float).mean():.1f} °C")
-        m3.metric("Volume Médio", f"{df_dados_filtrado['volume_agua_ml'].astype(float).mean():.0f} mL")
-except Exception:
-    st.info("Dados de microclima indisponíveis.")
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number", value=positividade, number={'suffix': "%"},
+        title={'text': st_risco},
+        gauge={'axis': {'range': [0, 100]}, 'bar': {'color': cor},
+               'steps': [{'range': [0, 15], 'color': '#D6EAF8'}, {'range': [15, 40], 'color': '#FDEBD0'}, {'range': [40, 100], 'color': '#FADBD8'}]}
+    ))
+    fig.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10))
+    st.plotly_chart(fig, width='stretch')
 
 # --- ESPÉCIES ---
 st.markdown("---")
-col_esq, col_dir = st.columns([2, 1])
-with col_esq:
-    try:
-        st.markdown("### 🦟 Espécies")
-        df_esp = df_dados_filtrado.groupby("especie_display").agg(Total=("soma_contagem", "sum")).reset_index()
-        if not df_esp.empty:
-            st.plotly_chart(px.bar(df_esp, x="especie_display", y="Total", color="especie_display", text="Total"), width='stretch')
-        else:
-            st.info("Nenhum dado de espécie.")
-    except Exception as e:
-        st.error(f"Erro no gráfico de espécies: {e}")
-
-with col_dir:
-    try:
-        st.markdown("### 📋 Totais")
-        if not df_esp.empty:
-            st.dataframe(df_esp.rename(columns={"especie_display": "Espécie", "Total": "Larvas"}), hide_index=True)
-    except Exception:
-        pass
+st.markdown("### 🦟 Espécies")
+df_esp = df_dados_filtrado.groupby("especie_display").agg(Total=("soma_contagem", "sum")).reset_index()
+if not df_esp.empty:
+    st.plotly_chart(px.bar(df_esp, x="especie_display", y="Total", color="especie_display", text="Total"), width='stretch')
+    st.dataframe(df_esp.rename(columns={"especie_display": "Espécie", "Total": "Larvas"}), hide_index=True)
 
 # --- NOTAS ---
 st.markdown("---")
 st.markdown("### 📝 Notas de Campo")
-try:
-    df_obs = df_dados_filtrado.dropna(subset=["observacoes_visita"])
-    df_obs = df_obs[df_obs["observacoes_visita"].astype(str).str.lower() != "nan"]
-    if not df_obs.empty:
-        for _, r in df_obs.iterrows():
-            st.info(f"**{r['id_bromelia_calc']}**: {r['observacoes_visita']}")
-    else:
-        st.success("Sem notas de campo.")
-except Exception:
+df_obs = df_dados_filtrado.dropna(subset=["observacoes_visita"])
+df_obs = df_obs[df_obs["observacoes_visita"].astype(str).str.lower() != "nan"]
+if not df_obs.empty:
+    for _, r in df_obs.iterrows():
+        st.info(f"**{r['id_bromelia_calc']}**: {r['observacoes_visita']}")
+else:
     st.success("Sem notas de campo.")
 
 # --- RODAPÉ ---
