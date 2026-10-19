@@ -6,18 +6,14 @@ import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from kobo_api import _get_secret, baixar_formulario, preparar_dados_completos
-from datetime import datetime
 
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 
+# Título simples (sem HTML que possa quebrar a página)
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
-st.markdown(f"""
-<div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-bottom: 20px; font-size: 14px;">
-    <b>Pesquisador:</b> Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | <b>Contato:</b> fhsantos@gmail.com <br>
-    <b>Última atualização:</b> {datetime.now().strftime('%d/%m/%Y às %H:%M')}
-</div>
-""", unsafe_allow_html=True)
+st.caption("Pesquisador: Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | Contato: fhsantos@gmail.com")
 
+# --- CARREGAMENTO ---
 base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
 token = _get_secret("KOBO_TOKEN")
 uid_campo = _get_secret("UID_CAMPO")
@@ -29,10 +25,10 @@ with st.spinner("Baixando dados..."):
     df_plantas, df_dados = preparar_dados_completos(lista_campo, lista_lab)
 
 if df_plantas.empty:
-    st.warning("Nenhum dado encontrado.")
+    st.warning("Nenhum dado encontrado no Kobo.")
     st.stop()
 
-# --- TRATAMENTO DE DADOS ---
+# --- TRATAMENTO ---
 df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip().replace(["nan", "none", ""], "nao_processado")
 df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
 df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
@@ -43,6 +39,7 @@ df_erros = df_dados[
     ((df_dados["resultado_real"] == "Negativo (Outros)") & (df_dados["resultado_digitado"] == "positivo"))
 ].copy()
 
+# --- MENU LATERAL ---
 with st.sidebar:
     st.markdown("### 🚨 Auditoria")
     if not df_erros.empty:
@@ -172,4 +169,10 @@ else:
 
 # --- RODAPÉ ---
 st.markdown("---")
-st.caption("Dashboard desenvolvido por Flávio Santos | IOC - Fiocruz")
+st.markdown("""
+<div style="text-align: center; color: gray; font-size: 14px; padding: 20px;">
+    Dashboard desenvolvido por <b>Flávio Santos</b><br>
+    Mestrado Profissional em Vigilância e Controle de Vetores (PPG-VCV) - IOC / Fiocruz<br>
+    Contato: fhsantos@gmail.com
+</div>
+""", unsafe_allow_html=True)
