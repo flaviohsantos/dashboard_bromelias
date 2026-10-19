@@ -1,26 +1,26 @@
 import streamlit as st
-  import pandas as pd
-  import plotly.express as px
-  import plotly.graph_objects as go
-  import folium
-  from folium.plugins import HeatMap
-  from streamlit_folium import st_folium
-  from datetime import datetime
-  import time
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import folium
+from folium.plugins import HeatMap
+from streamlit_folium import st_folium
+from datetime import datetime
+import time
 
   # Importação do módulo kobo_api
-  import kobo_api
+import kobo_api
 
-  st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
+st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 
   # --- DIAGNÓSTICO DE VERSÃO ---
   # Se você ver "VERSÃO 2.0" na tela, significa que o código atualizou!
-  st.markdown("🚀 **Versão do App: 2.0 (Diagnóstico)**")
+st.markdown("🚀 **Versão do App: 2.0 (Diagnóstico)**")
 
   # --- CABEÇALHO ---
-  st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
-  st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | **Contato:**
-  fhsantos@gmail.com")
+st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
+st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | **Contato:**
+fhsantos@gmail.com")
   st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
   st.markdown("---")
 
