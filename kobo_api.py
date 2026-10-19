@@ -1,9 +1,9 @@
 import os
 import requests
 import pandas as pd
+import streamlit as st
 
 def _get_secret(key: str, default: str = "") -> str:
-    import streamlit as st
     try:
         return st.secrets[key]
     except Exception:
@@ -25,6 +25,7 @@ def baixar_formulario(uid: str, token: str, base_url: str) -> list:
     return registros
 
 def preparar_dados_completos(lista_campo: list, lista_lab: list):
+    # Processa o CAMPO (Planta e Visitas)
     dados = []
     for item in lista_campo:
         id_planta = str(item.get("grp_cadastro/id_bromelia_calc") or "Sem ID").strip()
@@ -57,19 +58,14 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                         dados.append({
                             "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero, "latitude": lat, "longitude": lon,
                             "data_visita": data_visita, "presenca_imaturos": presenca, "id_amostra_calc": id_amostra,
-                            "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua, "observacoes_visita": obs_visita
+                            "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua, "observacoes_visita": obs_visita,
+                            "especie_identificada": None, "soma_contagem": 0, "resultado_digitado": "nao_processado", "resultado_real": "Nenhum", "observacoes_lab": None
                         })
-                else:
-                    dados.append({
-                        "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero, "latitude": lat, "longitude": lon,
-                        "data_visita": data_visita, "presenca_imaturos": presenca, "id_amostra_calc": None,
-                        "volume_agua_ml": vol_agua, "temp_agua_c": temp_agua, "ph_agua": ph_agua, "observacoes_visita": obs_visita
-                    })
 
+    # Processa o LABORATÓRIO
     lab_dict = {}
     for item in lista_lab:
-        id_amostra = item.get("grp_amostra/id_amostra_lab")
-        id_amostra = str(id_amostra).strip() if id_amostra else None
+        id_amostra = str(item.get("grp_amostra/id_amostra_lab") or "").strip()
         if not id_amostra: continue
             
         resultado_digitado = item.get("grp_resultado/resultado_amostra") or "nao_processado"
@@ -81,32 +77,25 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                 especie_bruta = e.get("rep_especies/especie_identificada") or "nao_identificado"
                 especie = str(especie_bruta).lower().strip().replace(" ", "_")
                 
-                soma_contagem = e.get("rep_especies/soma_contagem")
-                try: soma_contagem = int(float(soma_contagem)) if soma_contagem else 0
-                except: soma_contagem = 0
+                soma = e.get("rep_especies/soma_contagem")
+                try: soma = int(float(soma)) if soma else 0
+                except: soma = 0
 
                 resultado_real = "Positivo (Aedes)" if "aedes" in especie else "Negativo (Outros)"
 
                 lab_dict[id_amostra] = {
                     "especie_identificada": especie,
-                    "soma_contagem": soma_contagem,
+                    "soma_contagem": soma,
                     "resultado_digitado": resultado_digitado,
                     "resultado_real": resultado_real,
                     "observacoes_lab": obs_lab
                 }
 
+    # Cruza os dados
     for d in dados:
         id_am = d.get("id_amostra_calc")
-        if id_am in lab_dict:
+        if id_am and id_am in lab_dict:
             d.update(lab_dict[id_am])
-        else:
-            d.update({
-                "especie_identificada": None,
-                "soma_contagem": 0,
-                "resultado_digitado": "nao_processado",
-                "resultado_real": "Nenhum",
-                "observacoes_lab": None
-            })
 
     df_final = pd.DataFrame(dados) if dados else pd.DataFrame()
     df_plantas = df_final[["id_bromelia_calc", "bairro", "genero", "latitude", "longitude"]].drop_duplicates(subset=["id_bromelia_calc"]) if not df_final.empty else pd.DataFrame()
