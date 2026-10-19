@@ -19,38 +19,6 @@ st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fioc
 st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
 st.markdown("---")
 
-# --- CARREGAMENTO COM CHECKPOINTS ---
-st.write("🔄 **Status do Sistema:**")
-
-try:
-    # Checkpoint 1: Segredos
-    base_url = kobo_api._get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
-    token = kobo_api._get_secret("KOBO_TOKEN")
-    uid_campo = kobo_api._get_secret("UID_CAMPO")
-    uid_lab = kobo_api._get_secret("UID_LAB")
-    st.write("✅ 1. Segredos carregados.")
-
-    with st.spinner("Baixando dados do Kobo..."):
-        # Checkpoint 2: Dados de Campo
-        lista_campo = kobo_api.baixar_formulario(uid_campo, token, base_url)
-        st.write(f"✅ 2. Dados de Campo baixados ({len(lista_campo)} registros).")
-
-        # Checkpoint 3: Dados de Lab
-        lista_lab = kobo_api.baixar_formulario(uid_lab, token, base_url)
-        st.write(f"✅ 3. Dados de Lab baixados ({len(lista_lab)} registros).")
-
-        # Checkpoint 4: Processamento
-        df_plantas, df_dados = kobo_api.preparar_dados_completos(lista_campo, lista_lab)
-        st.write("✅ 4. Dados processados e cruzados.")
-
-except Exception as e:
-    st.error(f"❌ Erro no carregamento: {e}")
-    st.stop()
-
-if df_plantas.empty:
-    st.warning("⚠️ Nenhum dado encontrado nos formulários.")
-    st.stop()
-
 # --- TRATAMENTO DE DADOS ---
 df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip().replace(["nan", "none", ""], "nao_processado")
 df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
