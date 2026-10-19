@@ -115,4 +115,5 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
         for col in ["especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real", "observacoes_lab"]:
             df_final[col] = None
 
+    # FIM
     return df_plantas, df_final
