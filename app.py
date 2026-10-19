@@ -19,6 +19,21 @@ st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fioc
 st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
 st.markdown("---")
 
+# --- CARREGAMENTO DOS DADOS (AQUI ESTAVA O ERRO) ---
+base_url = kobo_api._get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
+token = kobo_api._get_secret("KOBO_TOKEN")
+uid_campo = kobo_api._get_secret("UID_CAMPO")
+uid_lab = kobo_api._get_secret("UID_LAB")
+
+with st.spinner("Baixando dados do Kobo..."):
+    lista_campo = kobo_api.baixar_formulario(uid_campo, token, base_url)
+    lista_lab = kobo_api.baixar_formulario(uid_lab, token, base_url)
+    df_plantas, df_dados = kobo_api.preparar_dados_completos(lista_campo, lista_lab)
+
+if df_plantas.empty:
+    st.warning("Nenhum dado encontrado nos formulários.")
+    st.stop()
+
 # --- TRATAMENTO DE DADOS ---
 df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip().replace(["nan", "none", ""], "nao_processado")
 df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
