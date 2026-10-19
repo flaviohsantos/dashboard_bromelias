@@ -1,4 +1,4 @@
-  import streamlit as st
+import streamlit as st
   import pandas as pd
   import plotly.express as px
   import plotly.graph_objects as go
@@ -6,36 +6,59 @@
   from folium.plugins import HeatMap
   from streamlit_folium import st_folium
   from datetime import datetime
+  import time
 
-  # Importação do módulo completo para evitar circular import
+  # Importação do módulo kobo_api
   import kobo_api
 
   st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 
+  # --- DIAGNÓSTICO DE VERSÃO ---
+  # Se você ver "VERSÃO 2.0" na tela, significa que o código atualizou!
+  st.markdown("🚀 **Versão do App: 2.0 (Diagnóstico)**")
+
   # --- CABEÇALHO ---
   st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
-  st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | **Contato:** fhsantos@gmail.com")
+  st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | **Contato:**
+  fhsantos@gmail.com")
   st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
   st.markdown("---")
 
-  # --- CARREGAMENTO ---
-  # Chamando as funções através do módulo kobo_api para garantir estabilidade
-  base_url = kobo_api._get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
-  token = kobo_api._get_secret("KOBO_TOKEN")
-  uid_campo = kobo_api._get_secret("UID_CAMPO")
-  uid_lab = kobo_api._get_secret("UID_LAB")
+  # --- CARREGAMENTO COM DIAGNÓSTICO ---
+  st.info("🔍 Iniciando processo de conexão com Kobo Toolbox...")
 
-  with st.spinner("Baixando dados..."):
-      lista_campo = kobo_api.baixar_formulario(uid_campo, token, base_url)
-      lista_lab = kobo_api.baixar_formulario(uid_lab, token, base_url)
-      df_plantas, df_dados = kobo_api.preparar_dados_completos(lista_campo, lista_lab)
+  try:
+      base_url = kobo_api._get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
+      token = kobo_api._get_secret("KOBO_TOKEN")
+      uid_campo = kobo_api._get_secret("UID_CAMPO")
+      uid_lab = kobo_api._get_secret("UID_LAB")
+
+      st.write("✅ Segredos (Tokens) carregados com sucesso.")
+
+      with st.spinner("Baixando dados do Kobo..."):
+          st.write("📡 Tentando conectar ao Kobo (Formulário de Campo)...")
+          lista_campo = kobo_api.baixar_formulario(uid_campo, token, base_url)
+          st.write(f"✅ Dados do Campo baixados com sucesso! ({len(lista_campo)} registros)")
+
+          st.write("📡 Tentando conectar ao Kobo (Formulário de Lab)...")
+          lista_lab = kobo_api.baixar_formulario(uid_lab, token, base_url)
+          st.write(f"✅ Dados do Lab baixados com sucesso! ({len(lista_lab)} registros)")
+
+          st.write("⚙️ Processando e cruzando dados...")
+          df_plantas, df_dados = kobo_api.preparar_dados_completos(lista_campo, lista_lab)
+          st.write("✅ Processamento concluído!")
+
+  except Exception as e:
+      st.error(f"❌ Erro crítico durante o carregamento: {e}")
+      st.stop()
 
   if df_plantas.empty:
-      st.warning("Nenhum dado encontrado.")
+      st.warning("⚠️ Nenhum dado encontrado nos formulários.")
       st.stop()
 
   # --- TRATAMENTO ---
-  df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip().replace(["nan", "none", ""], "nao_processado")
+  df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip().replace(["nan",
+  "none", ""], "nao_processado")
   df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
   df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
   df_dados.loc[df_dados["soma_contagem"] > 200, "soma_contagem"] = 0
@@ -53,7 +76,8 @@
           for idx, row in df_erros.iterrows():
               with st.expander(f"🔍 Amostra {row['id_amostra_calc']}"):
                   st.write(f"**Espécie:** {row['especie_identificada'].replace('_', ' ').capitalize()}")
-                  st.write(f"**Digitou:** {row['resultado_digitado'].capitalize()} | **Correto:** {row['resultado_real']}")
+                  st.write(f"**Digitou:** {row['resultado_digitado'].capitalize()} | **Correto:**
+  {row['resultado_real']}")
       else:
           st.success("✅ Nenhum erro de seleção.")
 
@@ -79,14 +103,16 @@
       df_dados_filtrado = df_dados_filtrado[df_dados_filtrado["genero"].isin(genero_sel)]
 
   df_dados_filtrado["especie_display"] = df_dados_filtrado["especie_identificada"].apply(
-      lambda x: f"{str(x).replace('_', ' ').capitalize()}" if pd.notna(x) and str(x).lower() != "nan" else "Não informado"
+      lambda x: f"{str(x).replace('_', ' ').capitalize()}" if pd.notna(x) and str(x).lower() != "nan" else "Não
+  informado"
   )
 
   n_plantas = df_plantas_filtrado["id_bromelia_calc"].nunique()
   n_visitas = df_dados_filtrado["data_visita"].notna().sum()
   n_amostras = df_dados_filtrado["id_amostra_calc"].nunique()
 
-  amostras_com_aedes = df_dados_filtrado[df_dados_filtrado["especie_identificada"].astype(str).str.lower().str.contains("aedes")]
+  amostras_com_aedes =
+  df_dados_filtrado[df_dados_filtrado["especie_identificada"].astype(str).str.lower().str.contains("aedes")]
   amostras_positivas = amostras_com_aedes["id_amostra_calc"].nunique()
   positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
   total_especimes = df_dados_filtrado["soma_contagem"].sum()
@@ -103,10 +129,13 @@
               m1 = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
               for _, row in df_mapa.iterrows():
                   if row["id_bromelia_calc"] in ids_positivos:
-                      folium.Circle(location=[row["latitude"], row["longitude"]], radius=100, color="#E63946", fill=True, fill_opacity=0.2, weight=2).add_to(m1)
-                      folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red"), popup=f"{row['id_bromelia_calc']}").add_to(m1)
+                      folium.Circle(location=[row["latitude"], row["longitude"]], radius=100, color="#E63946",
+  fill=True, fill_opacity=0.2, weight=2).add_to(m1)
+                      folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="red"),
+  popup=f"{row['id_bromelia_calc']}").add_to(m1)
                   else:
-                      folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue"), popup=f"{row['id_bromelia_calc']}").add_to(m1)
+                      folium.Marker(location=[row["latitude"], row["longitude"]], icon=folium.Icon(color="blue"),
+  popup=f"{row['id_bromelia_calc']}").add_to(m1)
               st_folium(m1, width=None, height=500, key="mapa1")
           else:
               df_calor = df_mapa[df_mapa["id_bromelia_calc"].isin(ids_positivos)]
@@ -128,7 +157,8 @@
           mode="gauge+number", value=positividade, number={'suffix': "%"},
           title={'text': st_risco},
           gauge={'axis': {'range': [0, 100]}, 'bar': {'color': cor},
-                 'steps': [{'range': [0, 15], 'color': '#D6EAF8'}, {'range': [15, 40], 'color': '#FDEBD0'}, {'range': [40, 100], 'color': '#FADBD8'}]}
+                 'steps': [{'range': [0, 15], 'color': '#D6EAF8'}, {'range': [15, 40], 'color': '#FDEBD0'}, {'range':
+  [40, 100], 'color': '#FADBD8'}]}
       ))
       fig.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10))
       st.plotly_chart(fig, width='stretch')
@@ -155,7 +185,8 @@
       st.markdown("### 🦟 Espécies")
       df_esp = df_dados_filtrado.groupby("especie_display").agg(Total=("soma_contagem", "sum")).reset_index()
       if not df_esp.empty:
-          st.plotly_chart(px.bar(df_esp, x="especie_display", y="Total", color="especie_display", text="Total"), width='stretch')
+          st.plotly_chart(px.bar(df_esp, x="especie_display", y="Total", color="especie_display", text="Total"),
+  width='stretch')
 
   with col_dir:
       st.markdown("### 📋 Totais")
