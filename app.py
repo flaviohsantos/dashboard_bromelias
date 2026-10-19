@@ -7,11 +7,9 @@ from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from datetime import datetime
 
-# Importação do módulo completo para evitar circular import
-# Importação do módulo completo para evitar circular import
+# Importação segura para evitar circular import
 import kobo_api
 
-# Configuração da página
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 
 # --- CABEÇALHO ---
@@ -20,22 +18,22 @@ st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fioc
 st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
 st.markdown("---")
 
-# --- CARREGAMENTO DOS DADOS (AQUI ESTAVA O ERRO) ---
+# --- CARREGAMENTO ---
 base_url = kobo_api._get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
 token = kobo_api._get_secret("KOBO_TOKEN")
 uid_campo = kobo_api._get_secret("UID_CAMPO")
 uid_lab = kobo_api._get_secret("UID_LAB")
 
-with st.spinner("Baixando dados do Kobo..."):
+with st.spinner("Baixando dados..."):
     lista_campo = kobo_api.baixar_formulario(uid_campo, token, base_url)
     lista_lab = kobo_api.baixar_formulario(uid_lab, token, base_url)
     df_plantas, df_dados = kobo_api.preparar_dados_completos(lista_campo, lista_lab)
 
 if df_plantas.empty:
-    st.warning("Nenhum dado encontrado nos formulários.")
+    st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# --- TRATAMENTO DE DADOS ---
+# --- TRATAMENTO E LIMPEZA ---
 df_dados["resultado_digitado"] = df_dados["resultado_digitado"].astype(str).str.lower().str.strip().replace(["nan", "none", ""], "nao_processado")
 df_dados["resultado_real"] = df_dados["resultado_real"].fillna("Nenhum")
 df_dados["soma_contagem"] = pd.to_numeric(df_dados["soma_contagem"], errors="coerce").fillna(0)
@@ -69,7 +67,7 @@ with st.sidebar:
     st.markdown("### 🗺️ Mapa")
     tipo_mapa = st.radio("Selecione:", ["Mapa Base e Raio (100m)", "🔥 Mapa de Calor"])
 
-# Filtros de dados
+# Aplicando filtros
 df_plantas_filtrado = df_plantas.copy()
 df_dados_filtrado = df_dados.copy()
 
@@ -88,6 +86,7 @@ n_plantas = df_plantas_filtrado["id_bromelia_calc"].nunique()
 n_visitas = df_dados_filtrado["data_visita"].notna().sum()
 n_amostras = df_dados_filtrado["id_amostra_calc"].nunique()
 
+# AQUI ESTÁ A CORREÇÃO: Força a busca por "aedes" na coluna de espécies
 amostras_com_aedes = df_dados_filtrado[df_dados_filtrado["especie_identificada"].astype(str).str.lower().str.contains("aedes")]
 amostras_positivas = amostras_com_aedes["id_amostra_calc"].nunique()
 positividade = (amostras_positivas / n_amostras * 100) if n_amostras > 0 else 0
@@ -120,6 +119,8 @@ with col_mapa:
                 st_folium(m2, width=None, height=500, key="mapa2")
             else:
                 st.info("Nenhum foco positivo.")
+    else:
+        st.info("Sem dados de coordenadas.")
 
 with col_termo:
     st.markdown("#### 🌡️ Termômetro")
