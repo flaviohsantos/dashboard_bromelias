@@ -8,6 +8,7 @@ from streamlit_folium import st_folium
 from datetime import datetime
 
 # Importação do módulo completo para evitar circular import
+# Importação do módulo completo para evitar circular import
 import kobo_api
 
 # Configuração da página
