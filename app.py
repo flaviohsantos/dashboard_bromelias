@@ -20,6 +20,7 @@ st.markdown("🚀 **Versão do App: 2.0 (Diagnóstico)**")
   # --- CABEÇALHO ---
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.markdown("**Pesquisador:** Flávio Santos (Mestrado Profissional - IOC - Fiocruz) | **Contato:**
+  fhsantos@gmail.com")
 fhsantos@gmail.com")
   st.caption(f"Última atualização dos dados: {datetime.now().strftime('%d/%m/%Y às %H:%M')}")
   st.markdown("---")
