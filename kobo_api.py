@@ -29,7 +29,7 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
     plantas = []
     dados_tabela = []
 
-    # 1. Processa o formulário de CAMPO
+    # 1. Processa o formulário de CAMPO (Visitas e Plantas)
     for item in lista_campo:
         id_planta = item.get("grp_cadastro/id_bromelia_calc") or "Sem ID"
         bairro = item.get("grp_cadastro/bairro") or "Não informado"
@@ -59,7 +59,6 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
                 amostras = v.get("rep_visitas/rep_amostras", [])
                 if isinstance(amostras, list) and len(amostras) > 0:
                     for a in amostras:
-                        # O código pode vir como id_amostra_calc ou dentro de uma sub-chave
                         id_amostra = a.get("rep_visitas/rep_amostras/id_amostra_calc") or a.get("id_amostra_calc")
                         dados_tabela.append({
                             "id_bromelia_calc": id_planta, "bairro": bairro, "genero": genero,
@@ -80,8 +79,13 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
     # 2. Processa o formulário de LABORATÓRIO
     lab_especies = []
     for item in lista_lab:
-        # Busca o ID da amostra em todos os lugares possíveis que o Kobo possa ter salvado
-        id_amostra = item.get("grp_amostra/id_amostra_lab") or item.get("id_amostra_lab")
+        # CAÇADOR DE ID: Tenta todas as formas possíveis que o Kobo salva o ID da amostra
+        id_amostra = (
+            item.get("grp_amostra/id_amostra_lab") or 
+            item.get("id_amostra_lab") or
+            item.get("grp_amostra/id_amostra")
+        )
+        
         if not id_amostra:
             continue
             
@@ -91,10 +95,11 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
         especies = item.get("rep_especies", [])
         if isinstance(especies, list):
             for e in especies:
-                # Busca a espécie e a contagem
+                # CAÇADOR DE ESPÉCIE
                 especie_bruta = e.get("rep_especies/especie_identificada") or e.get("especie_identificada") or "nao_identificado"
                 especie_formatada = str(especie_bruta).lower().strip().replace(" ", "_")
                 
+                # CAÇADOR DE CONTAGEM
                 soma_contagem = e.get("rep_especies/soma_contagem") or e.get("soma_contagem")
                 try:
                     soma_contagem = int(float(soma_contagem)) if soma_contagem else 0
@@ -119,11 +124,9 @@ def preparar_dados_completos(lista_campo: list, lista_lab: list):
     df_dados = pd.DataFrame(dados_tabela) if dados_tabela else pd.DataFrame(columns=["id_bromelia_calc", "bairro", "genero", "data_visita", "presenca_imaturos", "id_amostra_calc", "volume_agua_ml", "temp_agua_c", "ph_agua", "observacoes_visita"])
     df_lab = pd.DataFrame(lab_especies) if lab_especies else pd.DataFrame(columns=["id_amostra_calc", "especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real", "observacoes_lab"])
 
-    # 3. Faz o Merge
-    if not df_dados.empty and "id_amostra_calc" in df_dados.columns:
-        # Remove nulos do ID da amostra antes de juntar
-        df_dados_limpo = df_dados.dropna(subset=["id_amostra_calc"])
-        df_final = pd.merge(df_dados_limpo, df_lab, on="id_amostra_calc", how="left")
+    # 3. O MERGE DEFINITIVO
+    if not df_dados.empty and "id_amostra_calc" in df_dados.columns and not df_lab.empty:
+        df_final = pd.merge(df_dados, df_lab, on="id_amostra_calc", how="left")
     else:
         df_final = df_dados.copy()
         for col in ["especie_identificada", "soma_contagem", "resultado_digitado", "resultado_real", "observacoes_lab"]:
