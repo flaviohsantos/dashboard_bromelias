@@ -21,12 +21,10 @@ if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
 @st.cache_data
 def carregar_dados():
     try:
-        # Carrega as abas do arquivo de campo
         df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name="Pesquisa Bromélias Ornamenta...")
         df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
         df_amostras = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_amostras")
         
-        # Carrega as abas do arquivo de laboratório
         df_lab_principal = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
         df_lab_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
         
