@@ -11,28 +11,33 @@ st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.caption("Pesquisador: Flávio Santos (IOC - Fiocruz) | fhsantos@gmail.com")
 st.markdown("---")
 
+# --- CARREGAMENTO DOS ARQUIVOS EXCEL ---
 ARQUIVO_CAMPO = "campo.xlsx"
 ARQUIVO_LAB = "lab.xlsx"
 
 if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
-    st.error("⚠️ Arquivos 'campo.xlsx' e 'lab.xlsx' não encontrados. Baixe do Kobo e coloque na pasta.")
+    st.error("⚠️ Arquivos 'campo.xlsx' e 'lab.xlsx' não encontrados na pasta. Baixe do Kobo e coloque aqui.")
     st.stop()
 
 @st.cache_data
 def carregar_dados():
-    df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name=0)
-    df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name=1)
-    df_lab = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
-    df_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
-    return df_campo, df_visitas, df_lab, df_especies
+    try:
+        df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name=0)
+        df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name=1)
+        df_lab = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
+        df_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
+        return df_campo, df_visitas, df_lab, df_especies
+    except Exception as e:
+        st.error(f"Erro ao ler os arquivos: {e}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 df_campo, df_visitas, df_lab, df_especies = carregar_dados()
 
 if df_campo.empty or df_lab.empty or df_especies.empty:
     st.stop()
 
-# --- TRATAMENTO DOS DADOS (COM PROTEÇÃO) ---
-# 1. Plantas
+# --- TRATAMENTO DOS DADOS (BLINDADO) ---
+# 1. Plantas (Cadastro)
 df_plantas = pd.DataFrame({
     "id_bromelia": df_campo["id_bromelia_calc"],
     "bairro": df_campo["Bairro"],
@@ -41,39 +46,44 @@ df_plantas = pd.DataFrame({
     "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
 })
 
-# 2. Laboratório
+# 2. Laboratório (Cabeçalho)
 df_lab_tratado = pd.DataFrame({
     "num_amostra_lab": df_lab["Código da amostra"].astype(str).str.strip(),
     "submission_id": df_lab["_id"].astype(str)
 })
 
+# 3. Laboratório (Espécies)
 df_especies_tratado = pd.DataFrame({
     "especie": df_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
     "contagem": pd.to_numeric(df_especies["soma_contagem"], errors="coerce").fillna(0),
     "submission_id": df_especies["_submission__id"].astype(str)
 })
 
-df_especies_com_amostra = pd.merge(df_especies_tratado, df_lab_tratado, on="submission_id", how="left")
+# Junta as espécies com o número da amostra do lab
+df_especies_com_amostra = pd.merge(
+    df_especies_tratado, 
+    df_lab_tratado, 
+    on="submission_id", 
+    how="left"
+)
 
+# Agrupa as espécies pelo número da amostra
 df_lab_agrupado = df_especies_com_amostra.groupby("num_amostra_lab").agg({
     "especie": lambda x: ', '.join(x.unique()),
     "contagem": "sum"
 }).reset_index()
 
-# 3. Visitas (Blindado)
+# 4. Visitas (Blindado contra KeyError)
 # Tenta achar a coluna do ID da amostra na aba de visitas.
-# Se não achar, usa a coluna de id_amostra_calc se existir na aba principal.
 if "id_amostra_calc" in df_visitas.columns:
     df_visitas["num_amostra_visita"] = df_visitas["id_amostra_calc"].astype(str).str.rsplit('-', n=1).str[1]
-elif "id_amostra_calc" in df_campo.columns:
-    df_visitas["num_amostra_visita"] = df_campo["id_amostra_calc"].astype(str).str.rsplit('-', n=1).str[1]
 else:
-    # Se não tiver a coluna, tenta usar o nome exato que o Kobo gera
-    # Procura qualquer coluna que contenha 'amostra'
+    # Se a coluna não existir, tenta achar qualquer coluna com 'amostra' no nome
     col_amostra = next((c for c in df_visitas.columns if 'amostra' in str(c).lower()), None)
     if col_amostra:
         df_visitas["num_amostra_visita"] = df_visitas[col_amostra].astype(str).str.rsplit('-', n=1).str[1]
     else:
+        # Se não achar nada, cria a coluna vazia para não quebrar a página
         df_visitas["num_amostra_visita"] = None
 
 # Junta as visitas com o laboratório
@@ -118,8 +128,6 @@ c3.metric("Plantas Positivas", plantas_positivas)
 c4.metric("Positividade", f"{positividade:.1f}%")
 
 st.markdown("---")
-st.markdown("### 🗺️ Mapa de Risco (Raio de 100m)")
-df_mapa = df_final.dropna(subset=["lat", "lon"])
 
 # --- MAPAS ---
 st.markdown("### 🗺️ Mapa de Risco (Raio de 100m)")
