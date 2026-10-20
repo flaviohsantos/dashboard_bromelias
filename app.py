@@ -15,82 +15,93 @@ ARQUIVO_CAMPO = "campo.xlsx"
 ARQUIVO_LAB = "lab.xlsx"
 
 if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
-    st.error("⚠️ Arquivos 'campo.xlsx' e 'lab.xlsx' não encontrados.")
+    st.error("⚠️ Arquivos não encontrados.")
     st.stop()
 
 @st.cache_data
 def carregar_dados():
-    try:
-        df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name="Pesquisa Bromélias Ornamenta...")
-        df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
-        df_amostras = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_amostras")
-        
-        df_lab_principal = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
-        df_lab_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
-        
-        return df_campo, df_visitas, df_amostras, df_lab_principal, df_lab_especies
-    except Exception as e:
-        st.error(f"Erro ao ler as abas: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    # Carrega as abas
+    df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name="Pesquisa Bromélias Ornamenta...")
+    df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
+    df_amostras = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_amostras")
+    df_lab = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
+    df_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
+    return df_campo, df_visitas, df_amostras, df_lab, df_especies
 
-df_campo, df_visitas, df_amostras, df_lab_principal, df_lab_especies = carregar_dados()
+df_campo, df_visitas, df_amostras, df_lab, df_especies = carregar_dados()
 
-if df_campo.empty or df_lab_principal.empty or df_lab_especies.empty:
+# --- CRUZAMENTO INTELIGENTE (Caça a coluna certa) ---
+# 1. Encontra a coluna do ID da amostra no arquivo de campo (rep_amostras)
+col_id_amostra_campo = next((c for c in df_amostras.columns if "id_amostra_calc" in str(c)), None)
+if not col_id_amostra_campo:
+    col_id_amostra_campo = next((c for c in df_amostras.columns if "código da amostra" in str(c).lower()), None)
+
+# 2. Encontra a coluna do ID da amostra no arquivo de laboratório
+col_id_amostra_lab = next((c for c in df_lab.columns if "código da amostra" in str(c).lower()), None)
+
+# 3. Encontra a coluna de espécie no lab
+col_especie = next((c for c in df_especies.columns if "espécie identificada" in str(c).lower()), None)
+col_contagem = next((c for c in df_especies.columns if "soma_contagem" in str(c).lower()), None)
+
+# Se achou tudo, faz o cruzamento
+if col_id_amostra_campo and col_id_amostra_lab and col_especie and col_contagem:
+    # Prepara o lab
+    df_lab_tratado = pd.DataFrame({
+        "id_amostra_lab": df_lab[col_id_amostra_lab].astype(str).str.strip(),
+        "submission_id": df_lab["_id"].astype(str)
+    })
+    
+    df_especies_tratado = pd.DataFrame({
+        "especie": df_especies[col_especie].astype(str).str.lower().str.strip(),
+        "contagem": pd.to_numeric(df_especies[col_contagem], errors="coerce").fillna(0),
+        "submission_id": df_especies["_submission__id"].astype(str)
+    })
+    
+    # Junta o lab com as espécies
+    df_especies_lab = pd.merge(df_especies_tratado, df_lab_tratado, on="submission_id", how="left")
+    
+    # Agrupa o lab por amostra
+    df_lab_agrupado = df_especies_lab.groupby("id_amostra_lab").agg({
+        "especie": lambda x: ', '.join(x.unique()),
+        "contagem": "sum"
+    }).reset_index()
+    
+    # Prepara o campo (amostras)
+    df_amostras_tratado = pd.DataFrame({
+        "id_bromelia_visita": df_visitas["id_bromelia_visita"],
+        "id_amostra_campo": df_amostras[col_id_amostra_campo].astype(str).str.strip()
+    })
+    
+    # Junta campo com lab
+    df_visitas_com_lab = pd.merge(
+        df_amostras_tratado,
+        df_lab_agrupado,
+        left_on="id_amostra_campo",
+        right_on="id_amostra_lab",
+        how="left"
+    )
+    
+    # Agrupa por planta
+    df_visitas_por_planta = df_visitas_com_lab.groupby("id_bromelia_visita").agg({
+        "especie": lambda x: ', '.join(x.dropna().unique()),
+        "contagem": "sum"
+    }).reset_index()
+    
+    # Junta com as plantas
+    df_plantas = pd.DataFrame({
+        "id_bromelia": df_campo["id_bromelia_calc"],
+        "bairro": df_campo["Bairro"],
+        "genero": df_campo["Gênero da bromélia"],
+        "lat": pd.to_numeric(df_campo["_Geolocalização da planta_latitude"], errors="coerce"),
+        "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
+    })
+    
+    df_final = pd.merge(df_plantas, df_visitas_por_planta, left_on="id_bromelia", right_on="id_bromelia_visita", how="left")
+else:
+    st.error("Não foi possível encontrar as colunas necessárias para o cruzamento.")
+    st.write("Colunas disponíveis em rep_amostras:", list(df_amostras.columns))
+    st.write("Colunas disponíveis no lab:", list(df_lab.columns))
     st.stop()
-
-# --- TRATAMENTO DOS DADOS ---
-# 1. Plantas
-df_plantas = pd.DataFrame({
-    "id_bromelia": df_campo["id_bromelia_calc"],
-    "bairro": df_campo["Bairro"],
-    "genero": df_campo["Gênero da bromélia"],
-    "lat": pd.to_numeric(df_campo["_Geolocalização da planta_latitude"], errors="coerce"),
-    "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
-})
-
-# 2. Amostras (Campo) -> Usando o ID completo (BRO-...-30)
-df_amostras_tratado = pd.DataFrame({
-    "id_bromelia_visita": df_visitas["id_bromelia_visita"],
-    "id_amostra_calc": df_amostras["id_amostra_calc"].astype(str).str.strip()
-})
-
-# 3. Laboratório (Cabeçalho) -> Usando o ID completo que o técnico digitou
-df_lab_principal_tratado = pd.DataFrame({
-    "id_amostra_lab": df_lab_principal["Código da amostra"].astype(str).str.strip(),
-    "submission_id": df_lab_principal["_id"].astype(str)
-})
-
-# 4. Laboratório (Espécies)
-df_especies_tratado = pd.DataFrame({
-    "especie": df_lab_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
-    "contagem": pd.to_numeric(df_lab_especies["soma_contagem"], errors="coerce").fillna(0),
-    "submission_id": df_lab_especies["_submission__id"].astype(str)
-})
-
-df_especies_com_amostra = pd.merge(df_especies_tratado, df_lab_principal_tratado, on="submission_id", how="left")
-
-df_lab_agrupado = df_especies_com_amostra.groupby("id_amostra_lab").agg({
-    "especie": lambda x: ', '.join(x.unique()),
-    "contagem": "sum"
-}).reset_index()
-
-# 5. Cruza amostras do campo com o laboratório pelo ID COMPLETO
-df_visitas_com_lab = pd.merge(
-    df_amostras_tratado,
-    df_lab_agrupado,
-    left_on="id_amostra_calc",
-    right_on="id_amostra_lab",
-    how="left"
-)
-
-# Agrupa as espécies por planta
-df_visitas_por_planta = df_visitas_com_lab.groupby("id_bromelia_visita").agg({
-    "especie": lambda x: ', '.join(x.dropna().unique()),
-    "contagem": "sum"
-}).reset_index()
-
-# Junta com as plantas
-df_final = pd.merge(df_plantas, df_visitas_por_planta, left_on="id_bromelia", right_on="id_bromelia_visita", how="left")
 
 df_final["especie"] = df_final["especie"].fillna("Não informado").astype(str).str.replace("_", " ").str.capitalize()
 df_final["contagem"] = pd.to_numeric(df_final["contagem"], errors="coerce").fillna(0)
