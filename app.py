@@ -118,6 +118,8 @@ c3.metric("Plantas Positivas", plantas_positivas)
 c4.metric("Positividade", f"{positividade:.1f}%")
 
 st.markdown("---")
+st.markdown("### 🗺️ Mapa de Risco (Raio de 100m)")
+df_mapa = df_final.dropna(subset=["lat", "lon"])
 
 # --- MAPAS ---
 st.markdown("### 🗺️ Mapa de Risco (Raio de 100m)")
