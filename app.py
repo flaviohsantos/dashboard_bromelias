@@ -1,22 +1,180 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import folium
+from streamlit_folium import st_folium
 import os
 
-st.title("🔍 Diagnóstico no GitHub")
+st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
+st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
+st.caption("Pesquisador: Flávio Santos (IOC - Fiocruz) | fhsantos@gmail.com")
+st.markdown("---")
 
-if os.path.exists("campo.xlsx"):
-    st.success("✅ O arquivo 'campo.xlsx' ESTÁ no GitHub!")
-    df = pd.read_excel("campo.xlsx")
-    st.write(f"Colunas: {list(df.columns)}")
-    st.write(f"Linhas: {len(df)}")
+ARQUIVO_CAMPO = "campo.xlsx"
+ARQUIVO_LAB = "lab.xlsx"
+
+if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
+    st.error("⚠️ Arquivos 'campo.xlsx' e 'lab.xlsx' não encontrados.")
+    st.stop()
+
+@st.cache_data
+def carregar_dados():
+    try:
+        # Carrega todas as abas do campo e do lab
+        campo_abas = pd.read_excel(ARQUIVO_CAMPO, sheet_name=None)
+        lab_abas = pd.read_excel(ARQUIVO_LAB, sheet_name=None)
+        
+        # A primeira aba do campo é o cadastro da planta
+        df_plantas = campo_abas['Pesquisa Bromélias Ornamentais Urbanas'] if 'Pesquisa Bromélias Ornamentais Urbanas' in campo_abas else list(campo_abas.values())[0]
+        
+        # A segunda aba do campo é a visita
+        df_visitas = None
+        for nome, df in campo_abas.items():
+            if "visita" in nome.lower():
+                df_visitas = df
+                break
+        if df_visitas is None:
+            df_visitas = list(campo_abas.values())[1] # Pega a segunda aba como fallback
+
+        # A primeira aba do lab é o cabeçalho
+        df_lab = list(lab_abas.values())[0]
+        
+        # A segunda aba do lab é a espécie
+        df_especies = None
+        for nome, df in lab_abas.items():
+            if "especie" in nome.lower():
+                df_especies = df
+                break
+        if df_especies is None:
+            df_especies = list(lab_abas.values())[1]
+
+        return df_plantas, df_visitas, df_lab, df_especies
+    except Exception as e:
+        st.error(f"Erro ao ler as abas: {e}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+df_plantas_raw, df_visitas, df_lab, df_especies = carregar_dados()
+
+if df_plantas_raw.empty or df_lab.empty or df_especies.empty:
+    st.stop()
+
+# --- TRATAMENTO DOS DADOS ---
+# 1. Plantas
+df_plantas = pd.DataFrame({
+    "id_bromelia": df_plantas_raw["id_bromelia_calc"],
+    "bairro": df_plantas_raw["Bairro"],
+    "genero": df_plantas_raw["Gênero da bromélia"],
+    "lat": pd.to_numeric(df_plantas_raw["_Geolocalização da planta_latitude"], errors="coerce"),
+    "lon": pd.to_numeric(df_plantas_raw["_Geolocalização da planta_longitude"], errors="coerce")
+})
+
+# 2. Visitas
+# Vamos procurar a coluna de id_bromelia_visita e de id_amostra_calc
+col_id_visita = next((c for c in df_visitas.columns if 'id_bromelia_visita' in str(c).lower()), None)
+col_id_amostra = next((c for c in df_visitas.columns if 'id_amostra_calc' in str(c).lower()), None)
+
+if col_id_visita and col_id_amostra:
+    df_visitas_tratado = pd.DataFrame({
+        "id_bromelia": df_visitas[col_id_visita],
+        "num_amostra_visita": df_visitas[col_id_amostra].astype(str).str.rsplit('-', n=1).str[1]
+    })
 else:
-    st.error("❌ O arquivo 'campo.xlsx' NÃO está no GitHub.")
+    st.error("Não foi possível encontrar as colunas de ID na aba de visitas.")
+    st.stop()
+
+# 3. Laboratório
+df_lab_tratado = pd.DataFrame({
+    "num_amostra_lab": df_lab["Código da amostra"].astype(str).str.strip(),
+    "submission_id": df_lab["_id"].astype(str)
+})
+
+df_especies_tratado = pd.DataFrame({
+    "especie": df_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
+    "contagem": pd.to_numeric(df_especies["soma_contagem"], errors="coerce").fillna(0),
+    "submission_id": df_especies["_submission__id"].astype(str)
+})
+
+df_especies_com_amostra = pd.merge(df_especies_tratado, df_lab_tratado, on="submission_id", how="left")
+
+df_lab_agrupado = df_especies_com_amostra.groupby("num_amostra_lab").agg({
+    "especie": lambda x: ', '.join(x.unique()),
+    "contagem": "sum"
+}).reset_index()
+
+# Junta visitas com lab
+df_visitas_com_lab = pd.merge(
+    df_visitas_tratado,
+    df_lab_agrupado,
+    left_on="num_amostra_visita",
+    right_on="num_amostra_lab",
+    how="left"
+)
+
+df_visitas_por_planta = df_visitas_com_lab.groupby("id_bromelia").agg({
+    "especie": lambda x: ', '.join(x.dropna().unique()),
+    "contagem": "sum"
+}).reset_index()
+
+# Junta planta com lab
+df_final = pd.merge(df_plantas, df_visitas_por_planta, on="id_bromelia", how="left")
+
+df_final["especie"] = df_final["especie"].fillna("Não informado").astype(str).str.replace("_", " ").str.capitalize()
+df_final["contagem"] = pd.to_numeric(df_final["contagem"], errors="coerce").fillna(0)
+
+# --- MÉTRICAS ---
+n_plantas = df_final["id_bromelia"].nunique()
+total_especimes = df_final["contagem"].sum()
+tem_aedes = df_final["especie"].str.contains("Aedes", case=False, na=False)
+plantas_positivas = df_final[tem_aedes]["id_bromelia"].nunique()
+positividade = (plantas_positivas / n_plantas * 100) if n_plantas > 0 else 0
+
+st.markdown("### 📊 Indicadores")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Plantas", n_plantas)
+c2.metric("Espécimes (Lab)", int(total_especimes))
+c3.metric("Plantas Positivas", plantas_positivas)
+c4.metric("Positividade", f"{positividade:.1f}%")
 
 st.markdown("---")
 
-if os.path.exists("lab.xlsx"):
-    st.success("✅ O arquivo 'lab.xlsx' ESTÁ no GitHub!")
-    df = pd.read_excel("lab.xlsx")
-    st.write(f"Colunas: {list(df.columns)}")
+# --- MAPAS ---
+st.markdown("### 🗺️ Mapa de Risco (Raio de 100m)")
+df_mapa = df_final.dropna(subset=["lat", "lon"])
+
+if not df_mapa.empty:
+    m = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
+    ids_positivos = df_final[tem_aedes]["id_bromelia"].unique()
+    
+    for _, row in df_mapa.iterrows():
+        if row["id_bromelia"] in ids_positivos:
+            folium.Circle(location=[row["lat"], row["lon"]], radius=100, color="#E63946", fill=True, fill_opacity=0.2, weight=2).add_to(m)
+            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="red"), popup=f"{row['id_bromelia']}").add_to(m)
+        else:
+            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="blue"), popup=f"{row['id_bromelia']}").add_to(m)
+    st_folium(m, width=None, height=500, key="mapa")
 else:
-    st.error("❌ O arquivo 'lab.xlsx' NÃO está no GitHub.")
+    st.info("Sem coordenadas para o mapa.")
+
+# --- GRÁFICO DE ESPÉCIES ---
+st.markdown("---")
+st.markdown("### 🦟 Frequência de Espécies")
+
+lista_especies = []
+for _, row in df_final.iterrows():
+    if row["especie"] != "Não informado":
+        for esp in str(row["especie"]).split(','):
+            if esp.strip():
+                lista_especies.append({"Especie": esp.strip(), "Total": row["contagem"]})
+
+if lista_especies:
+    df_esp_chart = pd.DataFrame(lista_especies).groupby("Especie").sum().reset_index()
+    st.plotly_chart(px.bar(df_esp_chart, x="Especie", y="Total", color="Especie", text="Total"), use_container_width=True)
+    
+    st.markdown("#### 📋 Totais")
+    st.dataframe(df_esp_chart.rename(columns={"Especie": "Espécie", "Total": "Larvas"}), hide_index=True)
+else:
+    st.info("Nenhuma larva registrada.")
+
+st.markdown("---")
+st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
