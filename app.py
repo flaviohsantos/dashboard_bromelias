@@ -21,13 +21,10 @@ if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
 @st.cache_data
 def carregar_dados():
     try:
-        # Carrega as abas do arquivo de campo
         df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name="Pesquisa Bromélias Ornamenta...")
         df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
         df_amostras = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_amostras")
         
-        # Carrega as abas do arquivo de laboratório
-        # A primeira aba do lab é o cabeçalho, a segunda é a de espécies
         df_lab_principal = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
         df_lab_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
         
@@ -52,19 +49,21 @@ df_plantas = pd.DataFrame({
 })
 
 # 2. Amostras (do Campo)
-# A aba rep_amostras tem o id_amostra_calc (ex: BRO-...-30)
+# FORÇA O NÚMERO DA AMOSTRA A SER TEXTO
 df_amostras_tratado = pd.DataFrame({
     "id_bromelia_visita": df_visitas["id_bromelia_visita"],
     "id_amostra_calc": df_amostras["id_amostra_calc"],
-    "num_amostra_visita": df_amostras["Número da amostra"] # Número puro (ex: 30)
+    "num_amostra_visita": df_amostras["Número da amostra"].astype(str).str.strip() 
 })
 
-# 3. Laboratório (Espécies)
+# 3. Laboratório (Cabeçalho)
+# FORÇA O CÓDIGO DA AMOSTRA A SER TEXTO
 df_lab_principal_tratado = pd.DataFrame({
     "num_amostra_lab": df_lab_principal["Código da amostra"].astype(str).str.strip(),
     "submission_id": df_lab_principal["_id"].astype(str)
 })
 
+# 4. Laboratório (Espécies)
 df_especies_tratado = pd.DataFrame({
     "especie": df_lab_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
     "contagem": pd.to_numeric(df_lab_especies["soma_contagem"], errors="coerce").fillna(0),
@@ -78,7 +77,7 @@ df_lab_agrupado = df_especies_com_amostra.groupby("num_amostra_lab").agg({
     "contagem": "sum"
 }).reset_index()
 
-# 4. Cruza amostras do campo com o laboratório pelo número da amostra
+# 5. Cruza amostras do campo com o laboratório pelo número da amostra (Agora ambos são texto)
 df_visitas_com_lab = pd.merge(
     df_amostras_tratado,
     df_lab_agrupado,
