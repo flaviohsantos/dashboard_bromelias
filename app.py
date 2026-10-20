@@ -21,10 +21,12 @@ if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
 @st.cache_data
 def carregar_dados():
     try:
+        # Carrega as abas do arquivo de campo
         df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name="Pesquisa Bromélias Ornamenta...")
         df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
         df_amostras = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_amostras")
         
+        # Carrega as abas do arquivo de laboratório
         df_lab_principal = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
         df_lab_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
         
@@ -48,18 +50,15 @@ df_plantas = pd.DataFrame({
     "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
 })
 
-# 2. Amostras (do Campo)
-# FORÇA O NÚMERO DA AMOSTRA A SER TEXTO
+# 2. Amostras (Campo) -> Usando o ID completo (BRO-...-30)
 df_amostras_tratado = pd.DataFrame({
     "id_bromelia_visita": df_visitas["id_bromelia_visita"],
-    "id_amostra_calc": df_amostras["id_amostra_calc"],
-    "num_amostra_visita": df_amostras["Número da amostra"].astype(str).str.strip() 
+    "id_amostra_calc": df_amostras["id_amostra_calc"].astype(str).str.strip()
 })
 
-# 3. Laboratório (Cabeçalho)
-# FORÇA O CÓDIGO DA AMOSTRA A SER TEXTO
+# 3. Laboratório (Cabeçalho) -> Usando o ID completo que o técnico digitou
 df_lab_principal_tratado = pd.DataFrame({
-    "num_amostra_lab": df_lab_principal["Código da amostra"].astype(str).str.strip(),
+    "id_amostra_lab": df_lab_principal["Código da amostra"].astype(str).str.strip(),
     "submission_id": df_lab_principal["_id"].astype(str)
 })
 
@@ -72,17 +71,17 @@ df_especies_tratado = pd.DataFrame({
 
 df_especies_com_amostra = pd.merge(df_especies_tratado, df_lab_principal_tratado, on="submission_id", how="left")
 
-df_lab_agrupado = df_especies_com_amostra.groupby("num_amostra_lab").agg({
+df_lab_agrupado = df_especies_com_amostra.groupby("id_amostra_lab").agg({
     "especie": lambda x: ', '.join(x.unique()),
     "contagem": "sum"
 }).reset_index()
 
-# 5. Cruza amostras do campo com o laboratório pelo número da amostra (Agora ambos são texto)
+# 5. Cruza amostras do campo com o laboratório pelo ID COMPLETO
 df_visitas_com_lab = pd.merge(
     df_amostras_tratado,
     df_lab_agrupado,
-    left_on="num_amostra_visita",
-    right_on="num_amostra_lab",
+    left_on="id_amostra_calc",
+    right_on="id_amostra_lab",
     how="left"
 )
 
