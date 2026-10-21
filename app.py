@@ -305,5 +305,58 @@ if not df_visitas.empty:
 else:
     st.success("Nenhuma nota registrada.")
 
+# 7. TABELA CONSOLIDADA (DADOS PARA O TRABALHO)
+st.markdown("---")
+st.markdown("### 📋 Tabela Consolidada de Campo e Laboratório")
+
+# Prepara os dados para a tabela
+if not df_amostras.empty and not df_lab.empty and not df_visitas.empty:
+    # Junta amostras com o laboratório
+    df_tab = pd.merge(df_amostras, df_lab, on="codigo_amostra", how="left")
+    
+    # Junta com as visitas (para pegar a data e o pH/temp/vol)
+    # Como a amostra está dentro da visita, vamos trazer a data mais próxima
+    df_tab = pd.merge(df_tab, df_visitas, on="id_bromelia", how="left")
+    
+    # Traz as informações da planta (bairro, gênero)
+    df_tab = pd.merge(df_tab, df_plantas, on="id_bromelia", how="left")
+    
+    # Agrupa por planta (para mostrar uma linha por planta, com as espécies encontradas)
+    df_tabela_final = df_tab.groupby(["id_bromelia", "bairro", "genero"]).agg({
+        "especie": lambda x: ', '.join(x.dropna().unique()) if pd.notna(x).any() else "Não informado",
+        "qtd_especimes": "sum"
+    }).reset_index()
+    
+    # Limpa a string de espécies
+    df_tabela_final["especie"] = df_tabela_final["especie"].str.replace("_", " ").str.capitalize()
+    
+    # Cria a coluna de resultado (Positivo/Negativo)
+    df_tabela_final["Resultado (Aedes)"] = df_tabela_final["especie"].apply(
+        lambda x: "Positivo" if "aedes" in str(x).lower() else "Negativo"
+    )
+    
+    # Renomeia as colunas para exibição
+    df_exibicao = df_tabela_final.rename(columns={
+        "id_bromelia": "Planta",
+        "bairro": "Bairro",
+        "genero": "Gênero",
+        "especie": "Espécies Identificadas",
+        "qtd_especimes": "Total de Espécimes"
+    })
+    
+    # Mostra a tabela no Streamlit
+    st.dataframe(df_exibicao, use_container_width=True)
+    
+    # Adiciona um botão para baixar a tabela em CSV (Excel)
+    csv = df_exibicao.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Baixar Tabela em CSV",
+        data=csv,
+        file_name='tabela_consolidada_bromelias.csv',
+        mime='text/csv',
+    )
+else:
+    st.info("Ainda não há dados suficientes para gerar a tabela consolidada.")
+
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
