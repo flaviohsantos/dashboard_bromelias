@@ -416,5 +416,55 @@ with col_tab2:
     else:
         st.info("Sem dados de bairros.")
 
+# 9. ESTATÍSTICA DESCRITIVA DAS VARIÁVEIS AMBIENTAIS
+st.markdown("---")
+st.markdown("### 📈 Estatística Descritiva (Variáveis Ambientais)")
+
+if not df_visitas.empty:
+    # Prepara os dados (convertendo para numérico)
+    df_visitas["ph"] = pd.to_numeric(df_visitas["ph"], errors="coerce")
+    df_visitas["temp"] = pd.to_numeric(df_visitas["temp"], errors="coerce")
+    df_visitas["vol"] = pd.to_numeric(df_visitas["vol"], errors="coerce")
+    
+    # Cria um dicionário para montar a tabela
+    stats = []
+    
+    variaveis = {
+        "pH da Água": df_visitas["ph"],
+        "Temperatura (°C)": df_visitas["temp"],
+        "Volume (mL)": df_visitas["vol"]
+    }
+    
+    for nome, serie in variaveis.items():
+        # Remove nulos para calcular
+        dados = serie.dropna()
+        if not dados.empty:
+            stats.append({
+                "Variável": nome,
+                "N": len(dados),
+                "Média": round(dados.mean(), 2),
+                "Mediana": round(dados.median(), 2),
+                "Desvio Padrão": round(dados.std(), 2),
+                "Mínimo": round(dados.min(), 2),
+                "Máximo": round(dados.max(), 2)
+            })
+            
+    if stats:
+        df_stats = pd.DataFrame(stats)
+        st.dataframe(df_stats, hide_index=True, use_container_width=True)
+        
+        # Botão para baixar a tabela em CSV
+        csv_stats = df_stats.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Baixar Tabela de Estatísticas (CSV)",
+            data=csv_stats,
+            file_name='estatisticas_ambientais.csv',
+            mime='text/csv',
+        )
+    else:
+        st.info("Ainda não há dados de água suficientes para calcular as estatísticas.")
+else:
+    st.info("Sem dados de visitas para analisar.")
+
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
