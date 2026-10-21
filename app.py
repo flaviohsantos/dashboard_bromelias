@@ -17,6 +17,13 @@ if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
     st.error("⚠️ Arquivos não encontrados.")
     st.stop()
 
+# --- FUNÇÃO CAÇADORA DE COLUNAS ---
+def achar_coluna(df, *termos):
+    for col in df.columns:
+        if all(t in str(col).lower() for t in termos):
+            return col
+    return None
+
 @st.cache_data
 def carregar_dados():
     try:
@@ -33,28 +40,45 @@ df_campo, df_lab, df_especies = carregar_dados()
 if df_campo.empty or df_lab.empty or df_especies.empty:
     st.stop()
 
-# --- TRATAMENTO (Cruzamento pelo Código Base da Planta) ---
-# 1. Plantas (Pega o código único e as coordenadas)
+# --- TRATAMENTO DOS DADOS ---
+# 1. Plantas (Busca a coluna de ID)
+col_id_planta = achar_coluna(df_campo, "código único da planta") or achar_coluna(df_campo, "id_bromelia")
+if not col_id_planta:
+    st.error(f"Não achei o ID da planta no campo. Colunas: {list(df_campo.columns)}")
+    st.stop()
+
 df_plantas = pd.DataFrame({
-    "id_bromelia": df_campo["Código único da planta"],
-    "bairro": df_campo["Bairro"],
-    "genero": df_campo["Gênero da bromélia"],
-    "lat": pd.to_numeric(df_campo["_Geolocalização da planta_latitude"], errors="coerce"),
-    "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
+    "id_bromelia": df_campo[col_id_planta],
+    "bairro": df_campo[achar_coluna(df_campo, "bairro")] if achar_coluna(df_campo, "bairro") else "N/I",
+    "genero": df_campo[achar_coluna(df_campo, "gênero")] if achar_coluna(df_campo, "gênero") else "N/I",
+    "lat": pd.to_numeric(df_campo[achar_coluna(df_campo, "latitude")], errors="coerce") if achar_coluna(df_campo, "latitude") else None,
+    "lon": pd.to_numeric(df_campo[achar_coluna(df_campo, "longitude")], errors="coerce") if achar_coluna(df_campo, "longitude") else None
 })
 
-# 2. Laboratório (Extrai a base do código da amostra)
-# Ex: "BRO-2610210802-30" vira "BRO-2610210802"
-df_lab["id_planta_base"] = df_lab["Código da amostra"].astype(str).str.rsplit('-', n=1).str[0]
+# 2. Laboratório (Busca a coluna do código da amostra)
+col_amostra_lab = achar_coluna(df_lab, "código da amostra") or achar_coluna(df_lab, "id_amostra")
+if not col_amostra_lab:
+    st.error(f"Não achei o código da amostra no lab. Colunas: {list(df_lab.columns)}")
+    st.stop()
 
-# 3. Espécies (Pega o _submission__id para cruzar com o lab)
+df_lab["id_planta_base"] = df_lab[col_amostra_lab].astype(str).str.rsplit('-', n=1).str[0]
+
+# 3. Espécies
+col_especie = achar_coluna(df_especies, "espécie identificada")
+col_contagem = achar_coluna(df_especies, "soma_contagem")
+col_submission = achar_coluna(df_especies, "_submission__id")
+
+if not col_especie or not col_contagem:
+    st.error(f"Não achei as colunas de espécie/contagem. Colunas: {list(df_especies.columns)}")
+    st.stop()
+
 df_especies_tratado = pd.DataFrame({
-    "especie": df_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
-    "contagem": pd.to_numeric(df_especies["soma_contagem"], errors="coerce").fillna(0),
-    "submission_id": df_especies["_submission__id"].astype(str)
+    "especie": df_especies[col_especie].astype(str).str.lower().str.strip(),
+    "contagem": pd.to_numeric(df_especies[col_contagem], errors="coerce").fillna(0),
+    "submission_id": df_especies[col_submission].astype(str) if col_submission else None
 })
 
-# Junta o laboratório com as espécies
+# Junta espécies com o lab
 df_lab_completo = pd.merge(
     df_lab[["_id", "id_planta_base"]].astype(str), 
     df_especies_tratado, 
