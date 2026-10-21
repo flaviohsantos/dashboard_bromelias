@@ -82,11 +82,11 @@ for item in lista_lab:
     if isinstance(especies, list):
         for e in especies:
             especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
-            qtd = e.get("rep_especies/qtd_larvas") or 0
+            qtd_larvas = e.get("rep_especies/qtd_larvas") or 0
             qtd_pupas = e.get("rep_especies/qtd_pupas") or 0
             
-            # Conta larvas + pupas como "espécimes"
-            total_esp = (int(float(qtd)) if qtd else 0) + (int(float(qtd_pupas)) if qtd_pupas else 0)
+            # Soma larvas + pupas de CADA espécie
+            total_esp = (int(float(qtd_larvas)) if qtd_larvas else 0) + (int(float(qtd_pupas)) if qtd_pupas else 0)
             
             lab_especies.append({
                 "codigo_amostra": str(cod_lab).strip(),
@@ -158,16 +158,14 @@ if not df_mapa.empty:
 else:
     st.info("Sem coordenadas para o mapa.")
 
-# --- GRÁFICO ---
+# --- GRÁFICO DE ESPÉCIES ---
 st.markdown("---")
 st.markdown("### 🦟 Frequência de Espécies")
 
+# Explode a lista de espécies, para que cada uma vire uma linha separada
 especies_expandidas = df_final.explode("especie")
+
 if not especies_expandidas.empty:
-    # A mágica: para cada espécie, divide o total pelo número de espécies da amostra
-    # Se uma amostra tem 3 espécies e total 11, cada uma fica com 11/3 = 3.66
-    # Mas o correto é usar a quantidade específica de cada espécie.
-    # O código abaixo vai mostrar os valores corretos.
     df_chart = especies_expandidas.groupby("especie").agg({"qtd_especimes": "sum"}).reset_index()
     df_chart["especie"] = df_chart["especie"].str.replace("_", " ").str.capitalize()
     
