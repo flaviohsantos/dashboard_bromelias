@@ -502,5 +502,91 @@ if not df_visitas.empty:
 else:
     st.info("Sem dados de visitas para analisar.")
 
+# 9. ANÁLISE DE SAZONALIDADE E RANKING DE BAIRROS
+st.markdown("---")
+st.markdown("### 📈 Análise de Sazonalidade e Ranking de Bairros")
+
+col_saz, col_rank = st.columns([2, 1])
+
+# --- GRÁFICO DE SAZONALIDADE (LINHA POR MÊS) ---
+with col_saz:
+    st.markdown("#### Positividade de Aedes por Mês")
+    if not df_visitas.empty and not df_final.empty:
+        # Prepara os dados de visitas
+        df_saz = df_visitas.copy()
+        df_saz["data_visita"] = pd.to_datetime(df_saz["data_visita"], errors="coerce")
+        df_saz["mes"] = df_saz["data_visita"].dt.to_period("M").astype(str)
+        
+        # Junta com a positividade das plantas
+        df_saz = pd.merge(df_saz, df_final[["id_bromelia", "positivo"]], on="id_bromelia", how="left")
+        
+        # Agrupa por mês
+        df_saz_agrupado = df_saz.groupby("mes").agg(
+            Total_Plantas=("id_bromelia", "nunique"),
+            Plantas_Positivas=("positivo", "sum")
+        ).reset_index()
+        
+        # Calcula a porcentagem
+        df_saz_agrupado["% Positividade"] = (df_saz_agrupado["Plantas_Positivas"] / df_saz_agrupado["Total_Plantas"] * 100).round(1)
+        
+        # Cria o gráfico de linha
+        fig_saz = px.line(
+            df_saz_agrupado, 
+            x="mes", 
+            y="% Positividade", 
+            markers=True,
+            title="Variação da Positividade ao Longo do Tempo",
+            labels={"mes": "Mês", "% Positividade": "Positividade (%)"}
+        )
+        fig_saz.update_traces(line_color="#E63946", line_width=3, marker=dict(size=10))
+        fig_saz.update_layout(height=350, margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig_saz, use_container_width=True)
+        
+        # Mostra a tabela de dados por baixo do gráfico (opcional)
+        with st.expander("Ver dados mensais"):
+            st.dataframe(df_saz_agrupado, hide_index=True)
+    else:
+        st.info("Sem dados suficientes para a análise sazonal.")
+
+# --- RANKING DE BAIRROS ---
+with col_rank:
+    st.markdown("#### 🏘️ Ranking de Bairros (Maior Risco)")
+    if not df_plantas.empty and not df_final.empty:
+        # Prepara os dados de plantas
+        df_rank = df_plantas.copy()
+        
+        # Adiciona a coluna de positividade
+        df_rank = pd.merge(df_rank, df_final[["id_bromelia", "positivo"]], on="id_bromelia", how="left")
+        df_rank["positivo"] = df_rank["positivo"].fillna(False)
+        
+        # Agrupa por bairro
+        df_rank_agrupado = df_rank.groupby("bairro").agg(
+            Total_Plantas=("id_bromelia", "count"),
+            Positivas=("positivo", "sum")
+        ).reset_index()
+        
+        # Calcula a porcentagem
+        df_rank_agrupado["% Positividade"] = (df_rank_agrupado["Positivas"] / df_rank_agrupado["Total_Plantas"] * 100).round(1)
+        
+        # Ordena do maior para o menor risco
+        df_rank_agrupado = df_rank_agrupado.sort_values(by="% Positividade", ascending=False)
+        
+        # Renomeia para exibição
+        df_rank_exibicao = df_rank_agrupado.rename(columns={
+            "bairro": "Bairro",
+            "Total_Plantas": "Plantas",
+            "Positivas": "Positivas",
+            "% Positividade": "% Risco"
+        })
+        
+        st.dataframe(df_rank_exibicao, hide_index=True, use_container_width=True)
+        
+        # Adiciona um pequeno texto interpretativo
+        if not df_rank_agrupado.empty and df_rank_agrupado.iloc[0]["% Positividade"] > 0:
+            bairro_top = df_rank_agrupado.iloc[0]["bairro"]
+            st.warning(f"⚠️ O bairro **{bairro_top}** apresenta a maior taxa de positividade para *Aedes* até o momento.")
+    else:
+        st.info("Sem dados para o ranking de bairros.")
+
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
