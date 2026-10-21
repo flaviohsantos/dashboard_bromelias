@@ -21,78 +21,79 @@ if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
 @st.cache_data
 def carregar_dados():
     try:
-        abas_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name=None)
-        df_campo = next(df for nome, df in abas_campo.items() if "pesquisa" in nome.lower())
-        df_amostras = next(df for nome, df in abas_campo.items() if "amostra" in nome.lower())
-        
-        abas_lab = pd.read_excel(ARQUIVO_LAB, sheet_name=None)
-        df_lab = list(abas_lab.values())[0]
-        df_especies = list(abas_lab.values())[1]
-        
-        return df_campo, df_amostras, df_lab, df_especies
+        df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name="Pesquisa Bromélias Ornamenta...")
+        df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
+        df_lab = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
+        df_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
+        return df_campo, df_visitas, df_lab, df_especies
     except Exception as e:
         st.error(f"Erro ao ler as abas: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-df_campo, df_amostras, df_lab, df_especies = carregar_dados()
+df_campo, df_visitas, df_lab, df_especies = carregar_dados()
 
 if df_campo.empty or df_lab.empty or df_especies.empty:
     st.stop()
 
-# --- TRATAMENTO DOS DADOS ---
+# --- TRATAMENTO DOS DADOS (Cruzamento por Data) ---
 # 1. Plantas
 df_plantas = pd.DataFrame({
-    "id_bromelia": df_campo["Código único da planta"],
+    "id_bromelia": df_campo["id_bromelia_calc"],
     "bairro": df_campo["Bairro"],
     "genero": df_campo["Gênero da bromélia"],
     "lat": pd.to_numeric(df_campo["_Geolocalização da planta_latitude"], errors="coerce"),
     "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
 })
 
-# 2. Amostras (Campo)
-df_amostras_tratado = pd.DataFrame({
-    "codigo_amostra_campo": df_amostras["codigo_amostra"].astype(str).str.strip()
+# 2. Visitas (com data)
+df_visitas_tratado = pd.DataFrame({
+    "id_bromelia": df_visitas["id_bromelia_visita"],
+    "data_visita": pd.to_datetime(df_visitas["Data da visita"], errors="coerce", dayfirst=True)
 })
 
-# 3. Laboratório (Cabeçalho)
-col_codigo_lab = "Código da amostra (Ex: BRO-2610181726-30)"
+# 3. Laboratório (com data de processamento)
 df_lab_tratado = pd.DataFrame({
-    "codigo_amostra_lab": df_lab[col_codigo_lab].astype(str).str.strip(),
-    "id_envio_lab": df_lab["_id"].astype(str)
+    "data_processamento": pd.to_datetime(df_lab["Data do processamento"], errors="coerce", dayfirst=True),
+    "submission_id": df_lab["_id"].astype(str)
 })
 
-# 4. Laboratório (Espécies)
-col_especie = next((c for c in df_especies.columns if "Espécie identificada" in str(c)), None)
-col_contagem = next((c for c in df_especies.columns if "soma_contagem" in str(c)), None)
-
+# 4. Espécies
 df_especies_tratado = pd.DataFrame({
-    "especie": df_especies[col_especie].astype(str).str.lower().str.strip(),
-    "contagem": pd.to_numeric(df_especies[col_contagem], errors="coerce").fillna(0),
-    "id_envio_lab": df_especies["_submission__id"].astype(str)
+    "especie": df_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
+    "contagem": pd.to_numeric(df_especies["soma_contagem"], errors="coerce").fillna(0),
+    "submission_id": df_especies["_submission__id"].astype(str)
 })
 
-df_especies_agrupado = df_especies_tratado.groupby(["id_envio_lab", "especie"]).agg({
+# Junta espécies com a data de processamento
+df_especies_com_data = pd.merge(df_especies_tratado, df_lab_tratado, on="submission_id", how="left")
+
+# Agrupa as espécies por data
+df_lab_agrupado = df_especies_com_data.groupby("data_processamento").agg({
+    "especie": lambda x: ', '.join(x.unique()),
     "contagem": "sum"
 }).reset_index()
 
-df_lab_completo = pd.merge(df_lab_tratado, df_especies_agrupado, on="id_envio_lab", how="left")
+# --- O CRUZAMENTO PELA DATA (merge_asof) ---
+df_visitas_tratado = df_visitas_tratado.sort_values("data_visita")
+df_lab_agrupado = df_lab_agrupado.sort_values("data_processamento")
 
-# 5. Cruza Campo com Lab
-df_cruzado = pd.merge(
-    df_amostras_tratado,
-    df_lab_completo,
-    left_on="codigo_amostra_campo",
-    right_on="codigo_amostra_lab",
-    how="left"
+df_visitas_com_lab = pd.merge_asof(
+    df_visitas_tratado,
+    df_lab_agrupado,
+    left_on="data_visita",
+    right_on="data_processamento",
+    direction="nearest",
+    tolerance=pd.Timedelta(days=15)
 )
 
-df_cruzado["id_bromelia"] = df_cruzado["codigo_amostra_campo"].astype(str).str.rsplit('-', n=1).str[0]
-
-df_agrupado = df_cruzado.groupby(["id_bromelia", "especie"]).agg({
+# Agrupa as espécies por planta
+df_visitas_por_planta = df_visitas_com_lab.groupby("id_bromelia").agg({
+    "especie": lambda x: ', '.join(x.dropna().unique()),
     "contagem": "sum"
 }).reset_index()
 
-df_final = pd.merge(df_plantas, df_agrupado, on="id_bromelia", how="left")
+# Junta com as plantas
+df_final = pd.merge(df_plantas, df_visitas_por_planta, on="id_bromelia", how="left")
 
 df_final["especie"] = df_final["especie"].fillna("Não informado").astype(str).str.replace("_", " ").str.capitalize()
 df_final["contagem"] = pd.to_numeric(df_final["contagem"], errors="coerce").fillna(0)
@@ -113,22 +114,46 @@ c4.metric("Positividade", f"{positividade:.1f}%")
 
 st.markdown("---")
 
-# --- MAPAS ---
+# --- MAPAS (COM ZOOM INTELIGENTE) ---
 st.markdown("### 🗺️ Mapa de Risco (Raio de 100m)")
 df_mapa = df_final.dropna(subset=["lat", "lon"])
 
 if not df_mapa.empty:
-    m = folium.Map(location=[-22.9661, -42.0272], zoom_start=15, tiles="OpenStreetMap")
+    # Calcula o centro do mapa com base nas plantas
+    centro_lat = df_mapa["lat"].mean()
+    centro_lon = df_mapa["lon"].mean()
+    
+    # Zoom 16 foca bem nas ruas
+    m = folium.Map(location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap")
+    
     ids_positivos = df_final[tem_aedes]["id_bromelia"].unique()
     
-    df_mapa_unico = df_mapa.drop_duplicates(subset=["id_bromelia"])
-    
-    for _, row in df_mapa_unico.iterrows():
+    for _, row in df_mapa.iterrows():
         if row["id_bromelia"] in ids_positivos:
-            folium.Circle(location=[row["lat"], row["lon"]], radius=100, color="#E63946", fill=True, fill_opacity=0.2, weight=2).add_to(m)
-            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="red"), popup=f"{row['id_bromelia']}").add_to(m)
+            # Pino Vermelho + Raio
+            folium.Circle(
+                location=[row["lat"], row["lon"]], 
+                radius=100, 
+                color="#E63946", 
+                fill=True, 
+                fill_color="#E63946", 
+                fill_opacity=0.2, 
+                weight=2,
+                popup="Raio 100m (Aedes)"
+            ).add_to(m)
+            folium.Marker(
+                location=[row["lat"], row["lon"]], 
+                icon=folium.Icon(color="red", icon="info-sign"), 
+                popup=f"<b>{row['id_bromelia']}</b><br>POSITIVO"
+            ).add_to(m)
         else:
-            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="blue"), popup=f"{row['id_bromelia']}").add_to(m)
+            # Pino Azul
+            folium.Marker(
+                location=[row["lat"], row["lon"]], 
+                icon=folium.Icon(color="blue", icon="info-sign"), 
+                popup=f"<b>{row['id_bromelia']}</b><br>Negativo"
+            ).add_to(m)
+            
     st_folium(m, width=None, height=500, key="mapa")
 else:
     st.info("Sem coordenadas para o mapa.")
@@ -137,25 +162,19 @@ else:
 st.markdown("---")
 st.markdown("### 🦟 Frequência de Espécies")
 
-df_esp_chart = df_final[df_final["especie"] != "Não informado"].groupby("especie").agg(
-    Total=("contagem", "sum")
-).reset_index()
+lista_especies = []
+for _, row in df_final.iterrows():
+    if row["especie"] != "Não informado":
+        for esp in str(row["especie"]).split(','):
+            if esp.strip():
+                lista_especies.append({"Especie": esp.strip(), "Total": row["contagem"]})
 
-if not df_esp_chart.empty and df_esp_chart["Total"].sum() > 0:
-    st.plotly_chart(px.bar(df_esp_chart, x="especie", y="Total", color="especie", text="Total"), use_container_width=True)
+if lista_especies:
+    df_esp_chart = pd.DataFrame(lista_especies).groupby("Especie").sum().reset_index()
+    st.plotly_chart(px.bar(df_esp_chart, x="Especie", y="Total", color="Especie", text="Total"), use_container_width=True)
     
     st.markdown("#### 📋 Totais")
-    df_tabela = df_esp_chart.rename(columns={"especie": "Espécie", "Total": "Larvas"})
-    
-    st.dataframe(
-        df_tabela, 
-        use_container_width=True, 
-        hide_index=True,
-        column_config={
-            "Espécie": st.column_config.TextColumn(width="medium"),
-            "Larvas": st.column_config.NumberColumn(width="small")
-        }
-    )
+    st.dataframe(df_esp_chart.rename(columns={"Especie": "Espécie", "Total": "Larvas"}), hide_index=True)
 else:
     st.info("Nenhuma larva registrada.")
 
