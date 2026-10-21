@@ -82,11 +82,13 @@ for item in lista_lab:
     if isinstance(especies, list):
         for e in especies:
             especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
-            qtd_larvas = e.get("rep_especies/qtd_larvas") or 0
-            qtd_pupas = e.get("rep_especies/qtd_pupas") or 0
             
-            # Soma larvas + pupas de CADA espécie
-            total_esp = (int(float(qtd_larvas)) if qtd_larvas else 0) + (int(float(qtd_pupas)) if qtd_pupas else 0)
+            # AJUSTE 1: Incluir adultos na contagem
+            qtd_larvas = int(float(e.get("rep_especies/qtd_larvas") or 0))
+            qtd_pupas = int(float(e.get("rep_especies/qtd_pupas") or 0))
+            qtd_adultos = int(float(e.get("rep_especies/qtd_adultos") or 0))
+            
+            total_esp = qtd_larvas + qtd_pupas + qtd_adultos
             
             lab_especies.append({
                 "codigo_amostra": str(cod_lab).strip(),
@@ -95,7 +97,14 @@ for item in lista_lab:
             })
 
 df_plantas = pd.DataFrame(plantas)
+# AJUSTE 2: Remover duplicatas de plantas (se houver)
+df_plantas = df_plantas.drop_duplicates(subset=["id_bromelia"])
+
 df_amostras = pd.DataFrame(amostras)
+# AJUSTE 3: Remover duplicatas de amostras (se houver)
+if not df_amostras.empty:
+    df_amostras = df_amostras.drop_duplicates(subset=["codigo_amostra"])
+
 df_lab = pd.DataFrame(lab_especies)
 
 # --- CRUZAMENTO ---
@@ -133,7 +142,7 @@ positividade = (plantas_positivas / n_plantas * 100) if n_plantas > 0 else 0
 st.markdown("### 📊 Indicadores")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Plantas", n_plantas)
-c2.metric("Espécimes (Lab)", int(total_especimes))
+c2.metric("Espécimes Totais", int(total_especimes))
 c3.metric("Plantas Positivas", plantas_positivas)
 c4.metric("Positividade", f"{positividade:.1f}%")
 
@@ -162,20 +171,21 @@ else:
 st.markdown("---")
 st.markdown("### 🦟 Frequência de Espécies")
 
-# Explode a lista de espécies, para que cada uma vire uma linha separada
+# Explode a lista de espécies
 especies_expandidas = df_final.explode("especie")
 
 if not especies_expandidas.empty:
+    # Ajuste 4: A legenda do gráfico agora é "Total de Espécimes"
     df_chart = especies_expandidas.groupby("especie").agg({"qtd_especimes": "sum"}).reset_index()
     df_chart["especie"] = df_chart["especie"].str.replace("_", " ").str.capitalize()
     
     if df_chart["qtd_especimes"].sum() > 0:
         fig = px.bar(df_chart, x="especie", y="qtd_especimes", text="qtd_especimes", color="especie")
-        fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Espécimes")
+        fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Total de Espécimes")
         st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("#### 📋 Totais")
-        st.dataframe(df_chart.rename(columns={"especie": "Espécie", "qtd_especimes": "Larvas + Pupas"}), hide_index=True)
+        st.dataframe(df_chart.rename(columns={"especie": "Espécie", "qtd_especimes": "Larvas + Pupas + Adultos"}), hide_index=True)
     else:
         st.info("Nenhuma larva registrada.")
 
