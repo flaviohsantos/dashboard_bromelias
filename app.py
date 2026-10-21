@@ -186,8 +186,13 @@ if not df_mapa.empty:
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
     
-    # Cria as 3 abas
-    tab1, tab2, tab3 = st.tabs(["📍 Mapa Base e Raio (100m)", "🔥 Mapa de Calor (Apenas Focos)", "🌐 Mapa de Agrupamento (Clusters)"])
+   # Cria as 4 abas
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📍 Mapa Base e Raio (100m)", 
+        "🔥 Mapa de Calor (Apenas Focos)", 
+        "🌐 Mapa de Agrupamento (Clusters)",
+        "🏘️ Risco por Bairro"
+    ])
     
     with tab1:
         col_mapa, col_termo = st.columns([3, 1])
@@ -279,6 +284,69 @@ if not df_mapa.empty:
             st.info("O tamanho da bolha indica quantas plantas foram cadastradas naquela coordenada exata.")
         else:
             st.info("Sem dados para agrupar.")
+
+    # --- ABA 4: RISCO POR BAIRRO (CHOROPLETH SIMULADO) ---
+    with tab4:
+        st.markdown("#### 🏘️ Risco por Bairro (Positividade)")
+        
+        # Calcula o centro e o risco de cada bairro
+        df_bairro = df_mapa.groupby("bairro").agg(
+            lat=("lat", "mean"),
+            lon=("lon", "mean"),
+            plantas=("id_bromelia", "count")
+        ).reset_index()
+        
+        # Junta com a positividade
+        df_positivas = df_mapa[df_mapa["positivo"]].groupby("bairro").agg(positivas=("id_bromelia", "count")).reset_index()
+        df_bairro = pd.merge(df_bairro, df_positivas, on="bairro", how="left")
+        df_bairro["positivas"] = df_bairro["positivas"].fillna(0)
+        
+        # Calcula o percentual de risco (0 a 100)
+        df_bairro["% risco"] = (df_bairro["positivas"] / df_bairro["plantas"] * 100).round(1)
+        
+        if not df_bairro.empty:
+            # Cria o mapa base
+            m_bairro = folium.Map(location=[centro_lat, centro_lon], zoom_start=14, tiles="OpenStreetMap")
+            
+            # Adiciona as bolhas de risco
+            for _, row in df_bairro.iterrows():
+                # Define a cor baseada no risco (azul para baixo, vermelho para alto)
+                if row["% risco"] == 0:
+                    cor = "blue"
+                elif row["% risco"] < 50:
+                    cor = "orange"
+                else:
+                    cor = "red"
+                
+                # Tamanho da bolha proporcional ao número de plantas
+                raio = 200 + (row["plantas"] * 100)
+                
+                folium.Circle(
+                    location=[row["lat"], row["lon"]],
+                    radius=raio,
+                    color=cor,
+                    fill=True,
+                    fill_color=cor,
+                    fill_opacity=0.4,
+                    weight=2,
+                    popup=f"<b>Bairro: {row['bairro'].capitalize()}</b><br>"
+                          f"Plantas: {row['plantas']}<br>"
+                          f"Positivas: {row['positivas']}<br>"
+                          f"Risco: {row['% risco']}%"
+                ).add_to(m_bairro)
+                
+            st_folium(m_bairro, width=None, height=450, key="mapa_bairro")
+            
+            # Legenda
+            st.markdown("""
+            <div style='display: flex; gap: 20px; justify-content: center; font-size: 14px; margin-top: 10px;'>
+                <div><span style='color: blue; font-size: 18px;'>●</span> Sem risco (0%)</div>
+                <div><span style='color: orange; font-size: 18px;'>●</span> Risco médio (< 50%)</div>
+                <div><span style='color: red; font-size: 18px;'>●</span> Risco alto (>= 50%)</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("Sem dados para calcular o risco por bairro.")
         
 else:
     st.info("Sem coordenadas para o mapa.")
