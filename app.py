@@ -358,5 +358,63 @@ if not df_amostras.empty and not df_lab.empty and not df_visitas.empty:
 else:
     st.info("Ainda não há dados suficientes para gerar a tabela consolidada.")
 
+# 8. TABELAS DE TOTAIS E PERCENTUAIS
+st.markdown("---")
+st.markdown("### 📊 Tabelas de Totais e Percentuais")
+
+col_tab1, col_tab2 = st.columns(2)
+
+# --- TABELA 1: TOTAIS POR ESPÉCIE ---
+with col_tab1:
+    st.markdown("#### 🦟 Totais por Espécie")
+    if not df_lab.empty:
+        # Agrupa por espécie
+        df_esp = df_lab.groupby("especie").agg(Total=("qtd_especimes", "sum")).reset_index()
+        df_esp["especie"] = df_esp["especie"].str.replace("_", " ").str.capitalize()
+        
+        # Calcula o percentual
+        total_geral = df_esp["Total"].sum()
+        if total_geral > 0:
+            df_esp["Percentual (%)"] = (df_esp["Total"] / total_geral * 100).round(1).astype(str) + "%"
+        else:
+            df_esp["Percentual (%)"] = "0%"
+            
+        # Renomeia e ordena
+        df_esp = df_esp.rename(columns={"especie": "Espécie", "Total": "Larvas + Pupas"})
+        df_esp = df_esp.sort_values(by="Larvas + Pupas", ascending=False)
+        
+        st.dataframe(df_esp, hide_index=True, use_container_width=True)
+    else:
+        st.info("Sem dados de espécies.")
+
+# --- TABELA 2: TOTAIS POR BAIRRO ---
+with col_tab2:
+    st.markdown("#### 🏘️ Totais por Bairro")
+    if not df_plantas.empty:
+        # Agrupa por bairro
+        df_bairro = df_plantas.groupby("bairro").agg(Plantas=("id_bromelia", "count")).reset_index()
+        
+        # Junta com a positividade
+        # Pega os IDs das plantas positivas
+        ids_positivos = df_final[df_final["positivo"]]["id_bromelia"].unique()
+        
+        # Conta quantas plantas positivas por bairro
+        df_plantas_positivas = df_plantas[df_plantas["id_bromelia"].isin(ids_positivos)]
+        contagem_positivas = df_plantas_positivas.groupby("bairro").agg(Positivas=("id_bromelia", "count")).reset_index()
+        
+        # Junta as duas contagens
+        df_bairro = pd.merge(df_bairro, contagem_positivas, on="bairro", how="left")
+        df_bairro["Positivas"] = df_bairro["Positivas"].fillna(0).astype(int)
+        
+        # Calcula a porcentagem
+        df_bairro["% Positividade"] = (df_bairro["Positivas"] / df_bairro["Plantas"] * 100).round(1).astype(str) + "%"
+        
+        # Renomeia
+        df_bairro = df_bairro.rename(columns={"bairro": "Bairro", "Plantas": "Total de Plantas"})
+        
+        st.dataframe(df_bairro, hide_index=True, use_container_width=True)
+    else:
+        st.info("Sem dados de bairros.")
+
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
