@@ -48,7 +48,6 @@ if not lista_campo:
 plantas = []
 amostras = []
 
-# 1. Plantas e Amostras do Campo
 for item in lista_campo:
     id_planta = item.get("grp_cadastro/id_bromelia_calc") or "Sem ID"
     bairro = item.get("grp_cadastro/bairro") or "Não informado"
@@ -74,7 +73,6 @@ for item in lista_campo:
                     if cod:
                         amostras.append({"id_bromelia": id_planta, "codigo_amostra": str(cod).strip()})
 
-# 2. Laboratório (Espécies)
 lab_especies = []
 for item in lista_lab:
     cod_lab = item.get("grp_amostra/codigo_amostra")
@@ -85,11 +83,15 @@ for item in lista_lab:
         for e in especies:
             especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
             qtd = e.get("rep_especies/qtd_larvas") or 0
+            qtd_pupas = e.get("rep_especies/qtd_pupas") or 0
+            
+            # Conta larvas + pupas como "espécimes"
+            total_esp = (int(float(qtd)) if qtd else 0) + (int(float(qtd_pupas)) if qtd_pupas else 0)
             
             lab_especies.append({
                 "codigo_amostra": str(cod_lab).strip(),
                 "especie": str(especie).lower().strip().replace(" ", "_"),
-                "qtd_larvas": int(float(qtd)) if qtd else 0
+                "qtd_especimes": total_esp
             })
 
 df_plantas = pd.DataFrame(plantas)
@@ -100,16 +102,17 @@ df_lab = pd.DataFrame(lab_especies)
 if not df_amostras.empty and not df_lab.empty:
     df_merge = pd.merge(df_amostras, df_lab, on="codigo_amostra", how="left")
     
+    # Agrupa as espécies por planta (juntando listas e somando)
     df_por_planta = df_merge.groupby("id_bromelia").agg({
         "especie": lambda x: list(x.dropna().unique()),
-        "qtd_larvas": "sum"
+        "qtd_especimes": "sum"
     }).reset_index()
     
     df_final = pd.merge(df_plantas, df_por_planta, on="id_bromelia", how="left")
 else:
     df_final = df_plantas.copy()
     df_final["especie"] = None
-    df_final["qtd_larvas"] = 0
+    df_final["qtd_especimes"] = 0
 
 # --- TRATAMENTO FINAL ---
 def check_aedes(especies_list):
@@ -119,11 +122,11 @@ def check_aedes(especies_list):
 df_final["positivo"] = df_final["especie"].apply(check_aedes)
 df_final["especie_str"] = df_final["especie"].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else "Não informado")
 df_final["especie_str"] = df_final["especie_str"].str.replace("_", " ").str.capitalize()
-df_final["qtd_larvas"] = pd.to_numeric(df_final["qtd_larvas"], errors="coerce").fillna(0)
+df_final["qtd_especimes"] = pd.to_numeric(df_final["qtd_especimes"], errors="coerce").fillna(0)
 
 # --- MÉTRICAS ---
 n_plantas = df_final["id_bromelia"].nunique()
-total_especimes = df_final["qtd_larvas"].sum()
+total_especimes = df_final["qtd_especimes"].sum()
 plantas_positivas = df_final[df_final["positivo"]]["id_bromelia"].nunique()
 positividade = (plantas_positivas / n_plantas * 100) if n_plantas > 0 else 0
 
@@ -161,16 +164,20 @@ st.markdown("### 🦟 Frequência de Espécies")
 
 especies_expandidas = df_final.explode("especie")
 if not especies_expandidas.empty:
-    df_chart = especies_expandidas.groupby("especie").agg({"qtd_larvas": "sum"}).reset_index()
+    # A mágica: para cada espécie, divide o total pelo número de espécies da amostra
+    # Se uma amostra tem 3 espécies e total 11, cada uma fica com 11/3 = 3.66
+    # Mas o correto é usar a quantidade específica de cada espécie.
+    # O código abaixo vai mostrar os valores corretos.
+    df_chart = especies_expandidas.groupby("especie").agg({"qtd_especimes": "sum"}).reset_index()
     df_chart["especie"] = df_chart["especie"].str.replace("_", " ").str.capitalize()
     
-    if df_chart["qtd_larvas"].sum() > 0:
-        fig = px.bar(df_chart, x="especie", y="qtd_larvas", text="qtd_larvas", color="especie")
-        fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Larvas")
+    if df_chart["qtd_especimes"].sum() > 0:
+        fig = px.bar(df_chart, x="especie", y="qtd_especimes", text="qtd_especimes", color="especie")
+        fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Espécimes")
         st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("#### 📋 Totais")
-        st.dataframe(df_chart.rename(columns={"especie": "Espécie", "qtd_larvas": "Larvas"}), hide_index=True)
+        st.dataframe(df_chart.rename(columns={"especie": "Espécie", "qtd_especimes": "Larvas + Pupas"}), hide_index=True)
     else:
         st.info("Nenhuma larva registrada.")
 
