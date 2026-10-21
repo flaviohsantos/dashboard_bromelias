@@ -17,85 +17,88 @@ if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
     st.error("⚠️ Arquivos não encontrados.")
     st.stop()
 
-# --- FUNÇÃO CAÇADORA DE COLUNAS ---
-def achar_coluna(df, *termos):
-    for col in df.columns:
-        if all(t in str(col).lower() for t in termos):
-            return col
-    return None
-
 @st.cache_data
 def carregar_dados():
     try:
         df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name=0)
+        df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
+        df_amostras = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_amostras")
         df_lab = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
         df_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
-        return df_campo, df_lab, df_especies
+        return df_campo, df_visitas, df_amostras, df_lab, df_especies
     except Exception as e:
         st.error(f"Erro: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-df_campo, df_lab, df_especies = carregar_dados()
+df_campo, df_visitas, df_amostras, df_lab, df_especies = carregar_dados()
 
 if df_campo.empty or df_lab.empty or df_especies.empty:
     st.stop()
 
 # --- TRATAMENTO DOS DADOS ---
-# 1. Plantas (Busca a coluna de ID)
-col_id_planta = achar_coluna(df_campo, "código único da planta") or achar_coluna(df_campo, "id_bromelia")
-if not col_id_planta:
-    st.error(f"Não achei o ID da planta no campo. Colunas: {list(df_campo.columns)}")
-    st.stop()
-
+# 1. Plantas
 df_plantas = pd.DataFrame({
-    "id_bromelia": df_campo[col_id_planta],
-    "bairro": df_campo[achar_coluna(df_campo, "bairro")] if achar_coluna(df_campo, "bairro") else "N/I",
-    "genero": df_campo[achar_coluna(df_campo, "gênero")] if achar_coluna(df_campo, "gênero") else "N/I",
-    "lat": pd.to_numeric(df_campo[achar_coluna(df_campo, "latitude")], errors="coerce") if achar_coluna(df_campo, "latitude") else None,
-    "lon": pd.to_numeric(df_campo[achar_coluna(df_campo, "longitude")], errors="coerce") if achar_coluna(df_campo, "longitude") else None
+    "id_bromelia": df_campo["Código único da planta"],
+    "bairro": df_campo["Bairro"],
+    "genero": df_campo["Gênero da bromélia"],
+    "lat": pd.to_numeric(df_campo["_Geolocalização da planta_latitude"], errors="coerce"),
+    "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
 })
 
-# 2. Laboratório (Busca a coluna do código da amostra)
-col_amostra_lab = achar_coluna(df_lab, "código da amostra") or achar_coluna(df_lab, "id_amostra")
-if not col_amostra_lab:
-    st.error(f"Não achei o código da amostra no lab. Colunas: {list(df_lab.columns)}")
-    st.stop()
+# 2. Amostras (Campo)
+# Extrai o ID da planta do campo a partir do código da amostra (ex: BRO-123-1 -> BRO-123)
+df_amostras["id_planta_campo"] = df_amostras["codigo_amostra"].astype(str).str.rsplit('-', n=1).str[0]
+df_amostras_tratado = pd.DataFrame({
+    "id_bromelia": df_amostras["id_planta_campo"],
+    "codigo_amostra_campo": df_amostras["codigo_amostra"].astype(str).str.strip()
+})
 
-df_lab["id_planta_base"] = df_lab[col_amostra_lab].astype(str).str.rsplit('-', n=1).str[0]
+# 3. Laboratório (Cabeçalho)
+df_lab["codigo_amostra_lab"] = df_lab["Código da amostra (Ex: BRO-2610181726-30)"].astype(str).str.strip()
+df_lab_tratado = pd.DataFrame({
+    "codigo_amostra_lab": df_lab["codigo_amostra_lab"],
+    "submission_id": df_lab["_id"].astype(str)
+})
 
-# 3. Espécies
-col_especie = achar_coluna(df_especies, "espécie identificada")
-col_contagem = achar_coluna(df_especies, "soma_contagem")
-col_submission = achar_coluna(df_especies, "_submission__id")
-
-if not col_especie or not col_contagem:
-    st.error(f"Não achei as colunas de espécie/contagem. Colunas: {list(df_especies.columns)}")
-    st.stop()
-
+# 4. Espécies
 df_especies_tratado = pd.DataFrame({
-    "especie": df_especies[col_especie].astype(str).str.lower().str.strip(),
-    "contagem": pd.to_numeric(df_especies[col_contagem], errors="coerce").fillna(0),
-    "submission_id": df_especies[col_submission].astype(str) if col_submission else None
+    "especie": df_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
+    "contagem": pd.to_numeric(df_especies["soma_contagem"], errors="coerce").fillna(0),
+    "submission_id": df_especies["_submission__id"].astype(str)
 })
 
-# Junta espécies com o lab
-df_lab_completo = pd.merge(
-    df_lab[["_id", "id_planta_base"]].astype(str), 
-    df_especies_tratado, 
-    left_on="_id", right_on="submission_id", how="left"
+# Junta espécies com o lab (para pegar o código da amostra)
+df_especies_completo = pd.merge(df_especies_tratado, df_lab_tratado, on="submission_id", how="left")
+
+# Agrupa as espécies por amostra
+df_agrupado_amostra = df_especies_completo.groupby("codigo_amostra_lab").agg({
+    "especie": lambda x: list(x.unique()),
+    "contagem": "sum"
+}).reset_index()
+
+# Agora, junta as amostras do campo com o resultado do lab
+# Se o código bater, o resultado é o mesmo
+df_merge = pd.merge(
+    df_amostras_tratado,
+    df_agrupado_amostra,
+    left_on="codigo_amostra_campo",
+    right_on="codigo_amostra_lab",
+    how="left"
 )
 
-# Agrupa por planta base
-df_agrupado = df_lab_completo.groupby("id_planta_base").agg({
-    "especie": lambda x: ', '.join(x.dropna().unique()),
+# Agrupa por planta (para ter o total de espécies e larvas por planta)
+df_por_planta = df_merge.groupby("id_bromelia").agg({
+    "especie": lambda x: [item for sublist in x.dropna() for item in sublist],
     "contagem": "sum"
 }).reset_index()
 
 # Junta com as plantas
-df_final = pd.merge(df_plantas, df_agrupado, left_on="id_bromelia", right_on="id_planta_base", how="left")
+df_final = pd.merge(df_plantas, df_por_planta, on="id_bromelia", how="left")
 
-# Limpeza e Regra do Aedes
-df_final["especie"] = df_final["especie"].fillna("Não informado").astype(str).str.replace("_", " ").str.capitalize()
+# --- TRATAMENTO FINAL ---
+# Limpa a lista de espécies
+df_final["especie"] = df_final["especie"].apply(lambda x: ', '.join(x) if isinstance(x, list) else "Não informado")
+df_final["especie"] = df_final["especie"].str.replace("_", " ").str.capitalize()
 df_final["contagem"] = pd.to_numeric(df_final["contagem"], errors="coerce").fillna(0)
 df_final["positivo"] = df_final["especie"].str.lower().str.contains("aedes", na=False)
 
@@ -133,15 +136,22 @@ if not df_mapa.empty:
 else:
     st.info("Sem coordenadas para o mapa.")
 
-# --- GRÁFICO ---
+# --- GRÁFICO DE ESPÉCIES ---
 st.markdown("---")
 st.markdown("### 🦟 Frequência de Espécies")
+
+# Agora o gráfico vai explodir as espécies para contar cada uma individualmente
 lista_especies = []
 for _, row in df_final.iterrows():
     if row["especie"] != "Não informado":
-        for esp in str(row["especie"]).split(','):
-            if esp.strip():
-                lista_especies.append({"Especie": esp.strip(), "Total": row["contagem"]})
+        # A string pode ter "Aedes aegypti, Culex sp." -> precisamos separar
+        # Mas a contagem é o total da amostra. Para simplificar, dividimos pelo número de espécies
+        especies = [s.strip() for s in str(row["especie"]).split(',') if s.strip()]
+        num_especies = len(especies) if len(especies) > 0 else 1
+        valor_por_especie = row["contagem"] / num_especies
+        
+        for esp in especies:
+            lista_especies.append({"Especie": esp, "Total": valor_por_especie})
 
 if lista_especies:
     df_esp_chart = pd.DataFrame(lista_especies).groupby("Especie").sum().reset_index()
