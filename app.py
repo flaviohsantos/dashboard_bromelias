@@ -21,10 +21,15 @@ if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
 @st.cache_data
 def carregar_dados():
     try:
-        df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name="Pesquisa Bromélias Ornamenta...")
+        # Lê a PRIMEIRA aba (índice 0) como sendo o cadastro da planta
+        df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name=0)
+        # Lê as abas de visitas e amostras pelo nome (que geralmente não mudam)
         df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
+        
+        # Lê o laboratório
         df_lab = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
         df_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
+        
         return df_campo, df_visitas, df_lab, df_especies
     except Exception as e:
         st.error(f"Erro ao ler as abas: {e}")
@@ -119,18 +124,15 @@ st.markdown("### 🗺️ Mapa de Risco (Raio de 100m)")
 df_mapa = df_final.dropna(subset=["lat", "lon"])
 
 if not df_mapa.empty:
-    # Calcula o centro do mapa com base nas plantas
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
     
-    # Zoom 16 foca bem nas ruas
     m = folium.Map(location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap")
     
     ids_positivos = df_final[tem_aedes]["id_bromelia"].unique()
     
     for _, row in df_mapa.iterrows():
         if row["id_bromelia"] in ids_positivos:
-            # Pino Vermelho + Raio
             folium.Circle(
                 location=[row["lat"], row["lon"]], 
                 radius=100, 
@@ -147,7 +149,6 @@ if not df_mapa.empty:
                 popup=f"<b>{row['id_bromelia']}</b><br>POSITIVO"
             ).add_to(m)
         else:
-            # Pino Azul
             folium.Marker(
                 location=[row["lat"], row["lon"]], 
                 icon=folium.Icon(color="blue", icon="info-sign"), 
