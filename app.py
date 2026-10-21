@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import folium
 from streamlit_folium import st_folium
 import os
@@ -17,6 +16,13 @@ ARQUIVO_LAB = "lab.xlsx"
 if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
     st.error("⚠️ Arquivos não encontrados.")
     st.stop()
+
+# --- FUNÇÃO CAÇADORA DE COLUNAS ---
+def achar_coluna(df, *termos):
+    for col in df.columns:
+        if all(t in str(col).lower() for t in termos):
+            return col
+    return None
 
 @st.cache_data
 def carregar_dados():
@@ -37,86 +43,82 @@ if df_campo.empty or df_lab.empty or df_especies.empty:
     st.stop()
 
 # --- TRATAMENTO DOS DADOS ---
-# 1. Plantas (com o nome exato que vimos no diagnóstico)
+# 1. Plantas
+col_id_planta = achar_coluna(df_campo, "código único da planta") or achar_coluna(df_campo, "id_bromelia")
+if not col_id_planta:
+    st.error(f"Não achei a coluna de ID da planta. Colunas: {list(df_campo.columns)}")
+    st.stop()
+
 df_plantas = pd.DataFrame({
-    "id_bromelia": df_campo["Código único da planta"],
-    "bairro": df_campo["Bairro"],
-    "genero": df_campo["Gênero da bromélia"],
-    "lat": pd.to_numeric(df_campo["_Geolocalização da planta_latitude"], errors="coerce"),
-    "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
+    "id_bromelia": df_campo[col_id_planta],
+    "bairro": df_campo[achar_coluna(df_campo, "bairro")] if achar_coluna(df_campo, "bairro") else "N/I",
+    "genero": df_campo[achar_coluna(df_campo, "gênero")] if achar_coluna(df_campo, "gênero") else "N/I",
+    "lat": pd.to_numeric(df_campo[achar_coluna(df_campo, "latitude")], errors="coerce") if achar_coluna(df_campo, "latitude") else None,
+    "lon": pd.to_numeric(df_campo[achar_coluna(df_campo, "longitude")], errors="coerce") if achar_coluna(df_campo, "longitude") else None
 })
 
-# 2. Amostras do Campo (ID da amostra -> ID da planta)
-# O ID da amostra é tipo "BRO-2610181726-30", então extraímos a parte da planta.
-if "id_amostra_calc" in df_amostras.columns:
-    df_amostras["id_planta_campo"] = df_amostras["id_amostra_calc"].astype(str).str.rsplit('-', n=1).str[0]
-elif "Código da amostra: ${id_amostra_calc}" in df_amostras.columns:
-    df_amostras["id_planta_campo"] = df_amostras["Código da amostra: ${id_amostra_calc}"].astype(str).str.rsplit('-', n=1).str[0]
-else:
-    # Fallback: usa a coluna de número da amostra
-    df_amostras["id_planta_campo"] = df_visitas["id_bromelia_visita"]
+# 2. Amostras (Campo) -> Caça a coluna de ID da amostra
+col_amostra_campo = achar_coluna(df_amostras, "id_amostra") or achar_coluna(df_amostras, "código da amostra")
+if not col_amostra_campo:
+    st.error(f"Não achei a coluna de ID da amostra no campo. Colunas: {list(df_amostras.columns)}")
+    st.stop()
 
-# Junta a visita com a amostra
-df_visitas_com_amostras = pd.merge(
-    df_visitas[["id_bromelia_visita"]],
-    df_amostras[["id_planta_campo"]],
-    left_on="id_bromelia_visita", right_on="id_planta_campo", how="left"
-)
+df_amostras_tratado = pd.DataFrame({
+    "id_bromelia_visita": df_visitas["id_bromelia_visita"],
+    "id_amostra_campo": df_amostras[col_amostra_campo].astype(str).str.strip()
+})
 
-# 3. Laboratório
+# 3. Laboratório -> Caça a coluna de ID da amostra
+col_amostra_lab = achar_coluna(df_lab, "código da amostra") or achar_coluna(df_lab, "id_amostra")
+if not col_amostra_lab:
+    st.error(f"Não achei a coluna de ID da amostra no lab. Colunas: {list(df_lab.columns)}")
+    st.stop()
+
 df_lab_tratado = pd.DataFrame({
+    "id_amostra_lab": df_lab[col_amostra_lab].astype(str).str.strip(),
     "submission_id": df_lab["_id"].astype(str)
 })
+
+# 4. Espécies
+col_especie = achar_coluna(df_especies, "espécie identificada")
+col_contagem = achar_coluna(df_especies, "soma_contagem")
+col_submission = achar_coluna(df_especies, "_submission__id")
+
+if not col_especie or not col_contagem:
+    st.error(f"Não achei as colunas de espécie/contagem. Colunas: {list(df_especies.columns)}")
+    st.stop()
+
 df_especies_tratado = pd.DataFrame({
-    "especie": df_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
-    "contagem": pd.to_numeric(df_especies["soma_contagem"], errors="coerce").fillna(0),
-    "submission_id": df_especies["_submission__id"].astype(str)
+    "especie": df_especies[col_especie].astype(str).str.lower().str.strip(),
+    "contagem": pd.to_numeric(df_especies[col_contagem], errors="coerce").fillna(0),
+    "submission_id": df_especies[col_submission].astype(str) if col_submission else None
 })
 
-# Agrupa as espécies por submission
-df_especies_agrupado = df_especies_tratado.groupby("submission_id").agg({
-    "especie": lambda x: ', '.join(x.unique()),
-    "contagem": "sum"
-}).reset_index()
+# Junta espécies com o lab
+df_lab_completo = pd.merge(df_lab_tratado, df_especies_tratado, on="submission_id", how="left")
 
-# Junta as espécies com o ID do lab
-df_lab_completo = pd.merge(df_lab_tratado, df_especies_agrupado, on="submission_id", how="left")
-
-# 4. O CRUZAMENTO (Pelo código da planta)
-# Pega o código da planta do lab (se o ID for BRO-123-30, pega BRO-123)
-# Mas como o lab não tem o ID da planta diretamente, vamos usar o cruzamento pela data como fallback
-# ou tentar cruzar pelo ID da amostra.
-
-# Como o laboratório não tem o ID da planta, vamos cruzar pelo ID da amostra completo
-# Supondo que o campo tenha o id_amostra_calc e o lab tenha "Código da amostra"
-
-df_amostras["id_amostra_calc"] = df_amostras.get("id_amostra_calc", df_amostras.get("Código da amostra: ${id_amostra_calc}", None))
-df_lab["id_amostra_calc"] = df_lab["Código da amostra"]
-
+# --- CRUZAMENTO (Pelo ID da amostra) ---
 df_merge = pd.merge(
-    df_amostras[["id_planta_campo", "id_amostra_calc"]],
+    df_amostras_tratado,
     df_lab_completo,
-    left_on="id_amostra_calc",
-    right_on="submission_id",
+    left_on="id_amostra_campo",
+    right_on="id_amostra_lab",
     how="left"
 )
 
-# Agrupa por planta
-df_por_planta = df_merge.groupby("id_planta_campo").agg({
+# Agrupa por planta (id_bromelia_visita)
+df_por_planta = df_merge.groupby("id_bromelia_visita").agg({
     "especie": lambda x: ', '.join(x.dropna().unique()),
     "contagem": "sum"
 }).reset_index()
 
 # Junta com as plantas
-df_final = pd.merge(df_plantas, df_por_planta, left_on="id_bromelia", right_on="id_planta_campo", how="left")
+df_final = pd.merge(df_plantas, df_por_planta, left_on="id_bromelia", right_on="id_bromelia_visita", how="left")
 
-# --- A REGRA DO AEDES ---
-# Se a string de espécies contiver "aedes", a planta é positiva.
+# --- REGRA DO AEDES ---
 df_final["especie"] = df_final["especie"].fillna("Não informado").astype(str)
 df_final["especie"] = df_final["especie"].str.replace("_", " ").str.capitalize()
 df_final["contagem"] = pd.to_numeric(df_final["contagem"], errors="coerce").fillna(0)
-
-# Verifica se tem Aedes na string
 df_final["positivo"] = df_final["especie"].str.lower().str.contains("aedes", na=False)
 
 # --- MÉTRICAS ---
@@ -153,7 +155,7 @@ if not df_mapa.empty:
 else:
     st.info("Sem coordenadas para o mapa.")
 
-# --- GRÁFICO DE ESPÉCIES ---
+# --- GRÁFICO ---
 st.markdown("---")
 st.markdown("### 🦟 Frequência de Espécies")
 lista_especies = []
