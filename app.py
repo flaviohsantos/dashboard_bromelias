@@ -238,11 +238,14 @@ if not df_mapa.empty:
             st.plotly_chart(fig_cluster, use_container_width=True)
             
         # --- ABA 4: RISCO POR BAIRRO ---
+        # --- ABA 4: RISCO POR BAIRRO (MAPA) ---
     with tab4:
         st.markdown("#### 🏘️ Risco por Bairro (Positividade)")
         
-        # Calcula o risco de cada bairro
+        # Calcula o centro e o risco de cada bairro
         df_bairro = df_mapa.groupby("bairro").agg(
+            lat=("lat", "mean"),
+            lon=("lon", "mean"),
             plantas=("id_bromelia", "count")
         ).reset_index()
         
@@ -252,28 +255,32 @@ if not df_mapa.empty:
         
         # Calcula o percentual de risco
         df_bairro["% risco"] = (df_bairro["positivas"] / df_bairro["plantas"] * 100).round(1)
-        df_bairro = df_bairro.sort_values(by="% risco", ascending=True)
         
         if not df_bairro.empty:
-            # Cria um gráfico de barras horizontal
-            fig_bairro = px.bar(
+            # Cria o mapa usando Plotly (que não trava)
+            fig_bairro = px.scatter_mapbox(
                 df_bairro, 
-                x="% risco", 
-                y="bairro", 
-                orientation="h",
-                text="% risco",
+                lat="lat", 
+                lon="lon", 
+                size="plantas", 
                 color="% risco",
-                color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"],
-                labels={"bairro": "Bairro", "% risco": "Positividade (%)"}
+                color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], # Azul -> Laranja -> Vermelho
+                hover_name="bairro",
+                hover_data={"plantas": True, "positivas": True, "% risco": True, "lat": False, "lon": False},
+                center=dict(lat=centro_lat, lon=centro_lon),
+                zoom=13,
+                mapbox_style="open-street-map",
+                size_max=50 # Tamanho máximo da bolha
             )
-            fig_bairro.update_layout(
-                height=400, 
-                margin=dict(l=10, r=10, t=30, b=10),
-                coloraxis_showscale=False # Esconde a barra de cores lateral
-            )
-            st.plotly_chart(fig_bairro, use_container_width=True)
             
-            st.info("As barras mais longas e vermelhas indicam os bairros com maior risco de focos de Aedes.")
+            fig_bairro.update_layout(
+                height=500,
+                margin=dict(l=0, r=0, t=0, b=0),
+                coloraxis_colorbar=dict(title="% Risco")
+            )
+            
+            st.plotly_chart(fig_bairro, use_container_width=True)
+            st.info("O tamanho da bolha indica o número de plantas no bairro. A cor indica o risco (quanto mais vermelho, maior a positividade).")
         else:
             st.info("Sem dados para calcular o risco por bairro.")
 else:
