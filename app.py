@@ -237,27 +237,45 @@ if not df_mapa.empty:
             fig_cluster.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, legend_title_text="Status")
             st.plotly_chart(fig_cluster, use_container_width=True)
             
+        # --- ABA 4: RISCO POR BAIRRO ---
     with tab4:
+        st.markdown("#### 🏘️ Risco por Bairro (Positividade)")
+        
+        # Calcula o risco de cada bairro
         df_bairro = df_mapa.groupby("bairro").agg(
-            lat=("lat", "mean"), lon=("lon", "mean"), plantas=("id_bromelia", "count")
+            plantas=("id_bromelia", "count")
         ).reset_index()
+        
         df_positivas = df_mapa[df_mapa["positivo"]].groupby("bairro").agg(positivas=("id_bromelia", "count")).reset_index()
         df_bairro = pd.merge(df_bairro, df_positivas, on="bairro", how="left")
         df_bairro["positivas"] = df_bairro["positivas"].fillna(0)
+        
+        # Calcula o percentual de risco
         df_bairro["% risco"] = (df_bairro["positivas"] / df_bairro["plantas"] * 100).round(1)
+        df_bairro = df_bairro.sort_values(by="% risco", ascending=True)
         
         if not df_bairro.empty:
-            m_bairro = folium.Map(location=[centro_lat, centro_lon], zoom_start=14, tiles="OpenStreetMap")
-            for _, row in df_bairro.iterrows():
-                if row["% risco"] == 0: cor = "blue"
-                elif row["% risco"] < 50: cor = "orange"
-                else: cor = "red"
-                raio = 200 + (row["plantas"] * 100)
-                folium.Circle(
-                    location=[row["lat"], row["lon"]], radius=raio, color=cor, fill=True, fill_color=cor, fill_opacity=0.4, weight=2,
-                    popup=f"<b>Bairro: {row['bairro'].capitalize()}</b><br>Plantas: {row['plantas']}<br>Positivas: {row['positivas']}<br>Risco: {row['% risco']}%"
-                ).add_to(m_bairro)
-            st_folium(m_bairro, width=None, height=450, key="mapa_bairro")
+            # Cria um gráfico de barras horizontal
+            fig_bairro = px.bar(
+                df_bairro, 
+                x="% risco", 
+                y="bairro", 
+                orientation="h",
+                text="% risco",
+                color="% risco",
+                color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"],
+                labels={"bairro": "Bairro", "% risco": "Positividade (%)"}
+            )
+            fig_bairro.update_layout(
+                height=400, 
+                margin=dict(l=10, r=10, t=30, b=10),
+                coloraxis_showscale=False # Esconde a barra de cores lateral
+            )
+            st.plotly_chart(fig_bairro, use_container_width=True)
+            
+            st.info("As barras mais longas e vermelhas indicam os bairros com maior risco de focos de Aedes.")
+        else:
+            st.info("Sem dados para calcular o risco por bairro.")
 else:
     st.info("Sem coordenadas para o mapa.")
 
