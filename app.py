@@ -1,35 +1,242 @@
-import streamlit as st
+import os
+import unicodedata
+from datetime import datetime
+
+import folium
 import pandas as pd
 import plotly.express as px
-import folium
-from streamlit_folium import st_folium
-from datetime import datetime
 import requests
-import os
+import streamlit as st
+from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
-st.caption(f"Pesquisador: Flávio Santos (IOC - Fiocruz) | Atualizado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+st.caption(
+    f"Pesquisador: Flávio Santos (IOC - Fiocruz) | "
+    f"Atualizado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+)
 st.markdown("---")
 
+
 def _get_secret(key, default=""):
-    try: return st.secrets[key]
-    except: return os.environ.get(key, default)
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.environ.get(key, default)
+
 
 def baixar_formulario(uid, token, base_url):
-    if not uid: return []
+    """Baixa todas as páginas de registros de um formulário KoboToolbox."""
+    if not uid:
+        return []
+
     url = f"{base_url}/api/v2/assets/{uid}/data/"
     headers = {"Authorization": f"Token {token}"}
     params = {"format": "json"}
     registros = []
+
     while url:
-        r = requests.get(url, headers=headers, params=params, timeout=60)
-        r.raise_for_status()
-        payload = r.json()
+        response = requests.get(url, headers=headers, params=params, timeout=60)
+        response.raise_for_status()
+        payload = response.json()
         registros.extend(payload.get("results", []))
         url = payload.get("next")
-        params = {}
+        params = {}  # A URL da próxima página já contém seus próprios parâmetros.
+
     return registros
+
+
+def normalizar_texto(valor):
+    if valor is None:
+        return ""
+    texto = unicodedata.normalize("NFKD", str(valor))
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return " ".join(texto.lower().replace("_", " ").strip().split())
+
+
+def primeiro_valor(registro, chaves):
+    """Retorna o primeiro campo preenchido entre possíveis nomes Kobo."""
+    if not isinstance(registro, dict):
+        return None
+    for chave in chaves:
+        valor = registro.get(chave)
+        if valor is not None and str(valor).strip() != "":
+            return valor
+    return None
+
+
+def normalizar_codigo(valor):
+    if valor is None:
+        return None
+    if isinstance(valor, float) and valor.is_integer():
+        valor = int(valor)
+    codigo = str(valor).strip()
+    return codigo or None
+
+
+def numero_inteiro(valor):
+    """Converte campos numéricos do Kobo para contagens inteiras não negativas."""
+    if valor is None or str(valor).strip() == "":
+        return 0
+    try:
+        texto = str(valor).strip().replace(",", ".")
+        return max(0, int(float(texto)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def ler_contagem(registro, chaves_exatas, palavras_obrigatorias=()):
+    """Lê uma contagem por nomes conhecidos ou detecta uma chave compatível."""
+    if isinstance(registro, dict):
+        for chave in chaves_exatas:
+            if chave in registro:
+                return numero_inteiro(registro.get(chave)), True
+
+    if isinstance(registro, dict) and palavras_obrigatorias:
+        for chave, valor in registro.items():
+            nome = normalizar_texto(chave)
+            if all(palavra in nome for palavra in palavras_obrigatorias):
+                return numero_inteiro(valor), True
+
+    return 0, False
+
+
+def linhas_especies(registro_lab):
+    linhas = registro_lab.get("rep_especies", []) if isinstance(registro_lab, dict) else []
+    if isinstance(linhas, dict):
+        return [linhas]
+    if isinstance(linhas, list):
+        return [linha for linha in linhas if isinstance(linha, dict)]
+    return []
+
+
+def classificar_resultado(registro_lab):
+    chaves = [
+        "grp_amostra/resultado_geral",
+        "resultado_geral",
+        "grp_amostra/resultado_amostra",
+        "resultado_amostra",
+        "grp_amostra/resultado_final",
+        "resultado_final",
+    ]
+    valor = primeiro_valor(registro_lab, chaves)
+
+    # Fallback: encontra campos cujo nome indique resultado geral da amostra.
+    if valor is None and isinstance(registro_lab, dict):
+        for chave, candidato in registro_lab.items():
+            nome = normalizar_texto(chave)
+            if "resultado" in nome and ("geral" in nome or "amostra" in nome):
+                valor = candidato
+                break
+
+    texto = normalizar_texto(valor)
+    if "inconclus" in texto:
+        return "inconclusivo"
+    if "nao process" in texto:
+        return "nao_processado"
+    if "positiv" in texto:
+        return "positivo"
+    if "negativ" in texto:
+        return "negativo"
+    return "desconhecido"
+
+
+def extrair_analise(registro_lab):
+    """Resume uma análise laboratorial, incluindo larvas, pupas e adultos emergidos."""
+    codigo = normalizar_codigo(
+        primeiro_valor(
+            registro_lab,
+            ["grp_amostra/codigo_amostra", "codigo_amostra"],
+        )
+    )
+    if not codigo:
+        return None
+
+    especies = []
+    detalhes = []
+    total = 0
+    campo_adultos_encontrado = False
+
+    for linha in linhas_especies(registro_lab):
+        especie_original = primeiro_valor(
+            linha,
+            ["rep_especies/especie_identificada", "especie_identificada"],
+        )
+        especie = normalizar_texto(especie_original).replace(" ", "_")
+
+        qtd_larvas, _ = ler_contagem(
+            linha,
+            ["rep_especies/qtd_larvas", "qtd_larvas", "quantidade_larvas"],
+            ("larva",),
+        )
+        qtd_pupas, _ = ler_contagem(
+            linha,
+            ["rep_especies/qtd_pupas", "qtd_pupas", "quantidade_pupas"],
+            ("pupa",),
+        )
+        qtd_adultos, adulto_localizado = ler_contagem(
+            linha,
+            [
+                "rep_especies/qtd_adultos_emergidos",
+                "qtd_adultos_emergidos",
+                "rep_especies/quantidade_adultos_emergidos",
+                "quantidade_adultos_emergidos",
+                "adultos_emergidos",
+                "qtd_adultos",
+                "quantidade_adultos",
+            ],
+            ("adult",),
+        )
+        campo_adultos_encontrado = campo_adultos_encontrado or adulto_localizado
+
+        subtotal = qtd_larvas + qtd_pupas + qtd_adultos
+        total += subtotal
+
+        # Não cria uma espécie fictícia para uma linha de repetição inteiramente vazia.
+        if especie:
+            especies.append(especie)
+            detalhes.append(
+                {
+                    "codigo_amostra": codigo,
+                    "especie": especie,
+                    "qtd_especimes": subtotal,
+                }
+            )
+        elif subtotal > 0:
+            especie = "nao_identificado"
+            especies.append(especie)
+            detalhes.append(
+                {
+                    "codigo_amostra": codigo,
+                    "especie": especie,
+                    "qtd_especimes": subtotal,
+                }
+            )
+
+    resultado = classificar_resultado(registro_lab)
+    aedes = any("aedes" in especie for especie in especies)
+
+    # Positividade é avaliada somente em amostras com resultado positivo/negativo.
+    # Se o formulário não trouxer esse campo, uma linha de espécie preenchida serve
+    # como evidência de processamento; inconclusivo/não processado ficam excluídos.
+    if resultado in {"positivo", "negativo"}:
+        avaliada = True
+    elif resultado in {"inconclusivo", "nao_processado"}:
+        avaliada = False
+    else:
+        avaliada = bool(especies or total > 0)
+
+    return {
+        "codigo_amostra": codigo,
+        "especies": list(dict.fromkeys(especies)),
+        "qtd_especimes": total,
+        "positivo": aedes,
+        "avaliada": avaliada,
+        "resultado_lab": resultado,
+        "detalhes": detalhes,
+        "campo_adultos_encontrado": campo_adultos_encontrado,
+    }
+
 
 base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
 token = _get_secret("KOBO_TOKEN")
@@ -44,126 +251,249 @@ if not lista_campo:
     st.warning("Nenhum dado de campo encontrado.")
     st.stop()
 
-# --- PROCESSAMENTO ---
+# --- PROCESSAMENTO DOS DADOS DE CAMPO ---
 plantas = []
 amostras = []
 
-for item in lista_campo:
-    id_planta = item.get("grp_cadastro/id_bromelia_calc") or "Sem ID"
-    bairro = item.get("grp_cadastro/bairro") or "Não informado"
-    genero = item.get("grp_cadastro/genero") or "Não informado"
-    
-    geo = item.get("grp_cadastro/geolocalizacao")
+for indice, item in enumerate(lista_campo):
+    id_planta = primeiro_valor(
+        item,
+        ["grp_cadastro/id_bromelia_calc", "id_bromelia_calc", "codigo_planta"],
+    )
+    if id_planta is None:
+        # Evita agrupar todas as plantas sem ID sob o mesmo valor "Sem ID".
+        id_planta = f"SEM-ID-{item.get('_id', indice)}"
+    id_planta = str(id_planta).strip()
+
+    bairro = primeiro_valor(item, ["grp_cadastro/bairro", "bairro"]) or "Não informado"
+    genero = primeiro_valor(item, ["grp_cadastro/genero", "genero"]) or "Não informado"
+
+    geo = primeiro_valor(item, ["grp_cadastro/geolocalizacao", "geolocalizacao"])
     lat, lon = None, None
-    if isinstance(geo, str) and " " in geo:
-        try:
-            partes = geo.split()
-            lat, lon = float(partes[0]), float(partes[1])
-        except: pass
-        
-    plantas.append({"id_bromelia": id_planta, "bairro": bairro, "genero": genero, "lat": lat, "lon": lon})
+    if isinstance(geo, str):
+        partes = geo.replace(",", " ").split()
+        if len(partes) >= 2:
+            try:
+                lat, lon = float(partes[0]), float(partes[1])
+            except (TypeError, ValueError):
+                pass
+
+    plantas.append(
+        {
+            "id_bromelia": id_planta,
+            "bairro": bairro,
+            "genero": genero,
+            "lat": lat,
+            "lon": lon,
+        }
+    )
 
     visitas = item.get("rep_visitas", [])
+    if isinstance(visitas, dict):
+        visitas = [visitas]
     if isinstance(visitas, list):
-        for v in visitas:
-            ams = v.get("rep_visitas/rep_amostras", [])
+        for visita in visitas:
+            if not isinstance(visita, dict):
+                continue
+            ams = visita.get("rep_visitas/rep_amostras", [])
+            if isinstance(ams, dict):
+                ams = [ams]
             if isinstance(ams, list):
-                for a in ams:
-                    cod = a.get("rep_visitas/rep_amostras/codigo_amostra")
-                    if cod:
-                        amostras.append({"id_bromelia": id_planta, "codigo_amostra": str(cod).strip()})
+                for amostra in ams:
+                    if not isinstance(amostra, dict):
+                        continue
+                    codigo = normalizar_codigo(
+                        primeiro_valor(
+                            amostra,
+                            [
+                                "rep_visitas/rep_amostras/codigo_amostra",
+                                "codigo_amostra",
+                            ],
+                        )
+                    )
+                    if codigo:
+                        amostras.append(
+                            {"id_bromelia": id_planta, "codigo_amostra": codigo}
+                        )
 
-lab_especies = []
-for item in lista_lab:
-    cod_lab = item.get("grp_amostra/codigo_amostra")
-    if not cod_lab: continue
-    
-    especies = item.get("rep_especies", [])
-    if isinstance(especies, list):
-        for e in especies:
-            especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
-            
-            # AJUSTE 1: Incluir adultos na contagem
-            qtd_larvas = int(float(e.get("rep_especies/qtd_larvas") or 0))
-            qtd_pupas = int(float(e.get("rep_especies/qtd_pupas") or 0))
-            qtd_adultos = int(float(e.get("rep_especies/qtd_adultos") or 0))
-            
-            total_esp = qtd_larvas + qtd_pupas + qtd_adultos
-            
-            lab_especies.append({
-                "codigo_amostra": str(cod_lab).strip(),
-                "especie": str(especie).lower().strip().replace(" ", "_"),
-                "qtd_especimes": total_esp
-            })
-
+# Um cadastro de planta pode aparecer em mais de um envio/visita: manter uma linha.
 df_plantas = pd.DataFrame(plantas)
-# AJUSTE 2: Remover duplicatas de plantas (se houver)
-df_plantas = df_plantas.drop_duplicates(subset=["id_bromelia"])
+df_plantas = df_plantas.drop_duplicates(subset=["id_bromelia"], keep="last")
 
-df_amostras = pd.DataFrame(amostras)
-# AJUSTE 3: Remover duplicatas de amostras (se houver)
+# Cada código de amostra deve apontar para uma única planta.
+df_amostras = pd.DataFrame(amostras, columns=["id_bromelia", "codigo_amostra"])
 if not df_amostras.empty:
-    df_amostras = df_amostras.drop_duplicates(subset=["codigo_amostra"])
+    conflitos = (
+        df_amostras.groupby("codigo_amostra")["id_bromelia"].nunique().loc[lambda s: s > 1]
+    )
+    if not conflitos.empty:
+        st.warning(
+            "Há códigos de amostra associados a mais de uma planta. "
+            "Revise estes códigos no KoboToolbox: " + ", ".join(conflitos.index.astype(str))
+        )
+    df_amostras = df_amostras.drop_duplicates(subset=["codigo_amostra"], keep="first")
 
-df_lab = pd.DataFrame(lab_especies)
+# --- PROCESSAMENTO DOS DADOS LABORATORIAIS ---
+# O código de amostra é único no esquema proposto; se houver reenvio duplicado,
+# considera-se o registro mais recente recebido para não multiplicar as contagens.
+analises_por_codigo = {}
+for item in lista_lab:
+    analise = extrair_analise(item)
+    if analise:
+        analises_por_codigo[analise["codigo_amostra"]] = analise
 
-# --- CRUZAMENTO ---
+df_lab = pd.DataFrame(
+    [
+        {k: v for k, v in analise.items() if k != "detalhes"}
+        for analise in analises_por_codigo.values()
+    ],
+    columns=[
+        "codigo_amostra",
+        "especies",
+        "qtd_especimes",
+        "positivo",
+        "avaliada",
+        "resultado_lab",
+        "campo_adultos_encontrado",
+    ],
+)
+df_lab_detalhes = pd.DataFrame(
+    [
+        detalhe
+        for analise in analises_por_codigo.values()
+        for detalhe in analise["detalhes"]
+    ],
+    columns=["codigo_amostra", "especie", "qtd_especimes"],
+)
+
+if analises_por_codigo and not any(
+    analise["campo_adultos_encontrado"] for analise in analises_por_codigo.values()
+):
+    st.warning(
+        "Não encontrei o campo de adultos emergidos nos registros recebidos. "
+        "Verifique o nome interno desse campo no KoboToolbox e ajuste os nomes "
+        "em `extrair_analise()` se necessário."
+    )
+
+# --- CRUZAMENTO SEM DUPLICAR AMOSTRAS OU PLANTAS ---
 if not df_amostras.empty and not df_lab.empty:
-    df_merge = pd.merge(df_amostras, df_lab, on="codigo_amostra", how="left")
-    
-    # Agrupa as espécies por planta (juntando listas e somando)
-    df_por_planta = df_merge.groupby("id_bromelia").agg({
-        "especie": lambda x: list(x.dropna().unique()),
-        "qtd_especimes": "sum"
-    }).reset_index()
-    
-    df_final = pd.merge(df_plantas, df_por_planta, on="id_bromelia", how="left")
+    df_merge = pd.merge(
+        df_amostras,
+        df_lab,
+        on="codigo_amostra",
+        how="left",
+        validate="one_to_one",
+    )
+    df_por_planta = (
+        df_merge.groupby("id_bromelia", as_index=False)
+        .agg(
+            {
+                "especies": lambda valores: list(
+                    dict.fromkeys(
+                        especie
+                        for lista in valores
+                        if isinstance(lista, list)
+                        for especie in lista
+                    )
+                ),
+                "qtd_especimes": "sum",
+                "positivo": "max",
+                "avaliada": "max",
+            }
+        )
+    )
 else:
-    df_final = df_plantas.copy()
-    df_final["especie"] = None
-    df_final["qtd_especimes"] = 0
+    df_por_planta = pd.DataFrame(
+        columns=["id_bromelia", "especies", "qtd_especimes", "positivo", "avaliada"]
+    )
 
-# --- TRATAMENTO FINAL ---
-def check_aedes(especies_list):
-    if not isinstance(especies_list, list): return False
-    return any("aedes" in str(e).lower() for e in especies_list)
+df_final = pd.merge(df_plantas, df_por_planta, on="id_bromelia", how="left")
+if "especies" not in df_final:
+    df_final["especies"] = [[] for _ in range(len(df_final))]
+else:
+    df_final["especies"] = df_final["especies"].apply(
+        lambda valor: valor if isinstance(valor, list) else []
+    )
 
-df_final["positivo"] = df_final["especie"].apply(check_aedes)
-df_final["especie_str"] = df_final["especie"].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else "Não informado")
+df_final["qtd_especimes"] = pd.to_numeric(
+    df_final.get("qtd_especimes", 0), errors="coerce"
+).fillna(0)
+df_final["positivo"] = df_final.get("positivo", False).fillna(False).astype(bool)
+df_final["avaliada"] = df_final.get("avaliada", False).fillna(False).astype(bool)
+df_final["especie_str"] = df_final["especies"].apply(
+    lambda lista: ", ".join(lista) if lista else "Não informado"
+)
 df_final["especie_str"] = df_final["especie_str"].str.replace("_", " ").str.capitalize()
-df_final["qtd_especimes"] = pd.to_numeric(df_final["qtd_especimes"], errors="coerce").fillna(0)
 
 # --- MÉTRICAS ---
-n_plantas = df_final["id_bromelia"].nunique()
-total_especimes = df_final["qtd_especimes"].sum()
-plantas_positivas = df_final[df_final["positivo"]]["id_bromelia"].nunique()
-positividade = (plantas_positivas / n_plantas * 100) if n_plantas > 0 else 0
+n_plantas = int(df_final["id_bromelia"].nunique())
+total_especimes = int(df_final["qtd_especimes"].sum())
+df_avaliadas = df_final[df_final["avaliada"]]
+n_plantas_avaliadas = int(df_avaliadas["id_bromelia"].nunique())
+plantas_positivas = int(
+    df_avaliadas.loc[df_avaliadas["positivo"], "id_bromelia"].nunique()
+)
+positividade = (
+    plantas_positivas / n_plantas_avaliadas * 100
+    if n_plantas_avaliadas > 0
+    else 0
+)
 
 st.markdown("### 📊 Indicadores")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Plantas", n_plantas)
-c2.metric("Espécimes Totais", int(total_especimes))
-c3.metric("Plantas Positivas", plantas_positivas)
-c4.metric("Positividade", f"{positividade:.1f}%")
+c1.metric("Plantas cadastradas", n_plantas)
+c2.metric("Espécimes (Lab)", total_especimes)
+c3.metric(
+    "Plantas positivas",
+    plantas_positivas,
+    help=f"Contagem de plantas com Aedes identificado. Plantas com resultado positivo/negativo válido: {n_plantas_avaliadas}.",
+)
+c4.metric(
+    "Positividade entre avaliadas",
+    f"{positividade:.1f}%",
+    help=f"{plantas_positivas} planta(s) positiva(s) de {n_plantas_avaliadas} planta(s) com resultado laboratorial avaliável. Inconclusivas, não processadas e sem análise ficam fora do denominador.",
+)
 
 st.markdown("---")
 
-# --- MAPAS ---
+# --- MAPA ---
 st.markdown("### 🗺️ Mapa de Risco (Raio de 100m)")
 df_mapa = df_final.dropna(subset=["lat", "lon"])
 
 if not df_mapa.empty:
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
-    m = folium.Map(location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap")
-    
-    for _, row in df_mapa.iterrows():
-        if row["positivo"]:
-            folium.Circle(location=[row["lat"], row["lon"]], radius=100, color="#E63946", fill=True, fill_color="#E63946", fill_opacity=0.2, weight=2).add_to(m)
-            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>POSITIVO ({row['especie_str']})").add_to(m)
+    mapa = folium.Map(
+        location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap"
+    )
+
+    for _, linha in df_mapa.iterrows():
+        if linha["positivo"]:
+            folium.Circle(
+                location=[linha["lat"], linha["lon"]],
+                radius=100,
+                color="#E63946",
+                fill=True,
+                fill_color="#E63946",
+                fill_opacity=0.2,
+                weight=2,
+            ).add_to(mapa)
+            cor = "red"
+            resultado_mapa = f"POSITIVO ({linha['especie_str']})"
+        elif linha["avaliada"]:
+            cor = "blue"
+            resultado_mapa = "Sem Aedes detectado na análise"
         else:
-            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>Negativo ({row['especie_str']})").add_to(m)
-    st_folium(m, width=None, height=500, key="mapa")
+            cor = "gray"
+            resultado_mapa = "Sem resultado laboratorial avaliável"
+
+        folium.Marker(
+            location=[linha["lat"], linha["lon"]],
+            icon=folium.Icon(color=cor, icon="info-sign"),
+            popup=f"<b>{linha['id_bromelia']}</b><br>{resultado_mapa}",
+        ).add_to(mapa)
+
+    st_folium(mapa, width=None, height=500, key="mapa")
 else:
     st.info("Sem coordenadas para o mapa.")
 
@@ -171,23 +501,43 @@ else:
 st.markdown("---")
 st.markdown("### 🦟 Frequência de Espécies")
 
-# Explode a lista de espécies
-especies_expandidas = df_final.explode("especie")
+if not df_lab_detalhes.empty:
+    df_chart = (
+        df_lab_detalhes.groupby("especie", as_index=False)["qtd_especimes"]
+        .sum()
+    )
+    df_chart["especie"] = (
+        df_chart["especie"].str.replace("_", " ", regex=False).str.capitalize()
+    )
 
-if not especies_expandidas.empty:
-    # Ajuste 4: A legenda do gráfico agora é "Total de Espécimes"
-    df_chart = especies_expandidas.groupby("especie").agg({"qtd_especimes": "sum"}).reset_index()
-    df_chart["especie"] = df_chart["especie"].str.replace("_", " ").str.capitalize()
-    
     if df_chart["qtd_especimes"].sum() > 0:
-        fig = px.bar(df_chart, x="especie", y="qtd_especimes", text="qtd_especimes", color="especie")
-        fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Total de Espécimes")
-        st.plotly_chart(fig, use_container_width=True)
-        
+        figura = px.bar(
+            df_chart,
+            x="especie",
+            y="qtd_especimes",
+            text="qtd_especimes",
+            color="especie",
+        )
+        figura.update_layout(showlegend=False, xaxis_title="", yaxis_title="Espécimes")
+        st.plotly_chart(figura, use_container_width=True)
+
         st.markdown("#### 📋 Totais")
-        st.dataframe(df_chart.rename(columns={"especie": "Espécie", "qtd_especimes": "Larvas + Pupas + Adultos"}), hide_index=True)
+        st.dataframe(
+            df_chart.rename(
+                columns={
+                    "especie": "Espécie",
+                    "qtd_especimes": "Larvas + pupas + adultos emergidos",
+                }
+            ),
+            hide_index=True,
+        )
     else:
-        st.info("Nenhuma larva registrada.")
+        st.info("Nenhum espécime contado nos registros laboratoriais.")
+else:
+    st.info("Ainda não há espécies registradas nas análises laboratoriais.")
 
 st.markdown("---")
-st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
+st.caption(
+    "Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | "
+    "Contato: fhsantos@gmail.com"
+)
