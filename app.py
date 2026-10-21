@@ -1,15 +1,41 @@
-KeyError: This app has encountered an error. The original error message is redacted to prevent data leaks. Full error details have been recorded in the logs (if you're on Streamlit Cloud, click on 'Manage app' in the lower right of your app).
-Traceback:
-File "/home/adminuser/venv/lib/python3.11/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 88, in exec_func_with_error_handling
-    result = func()
-             ^^^^^^
-File "/home/adminuser/venv/lib/python3.11/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 590, in code_to_exec
-    exec(code, module.__dict__)
-File "/mount/src/dashboard_bromelias/app.py", line 46, in <module>
-    "id_bromelia": df_campo["id_bromelia_calc"],
-                   ~~~~~~~~^^^^^^^^^^^^^^^^^^^^
-File "/home/adminuser/venv/lib/python3.11/site-packages/pandas/core/frame.py", line 4102, in __getitem__
-    indexer = self.columns.get_loc(key)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^
-File "/home/adminuser/venv/lib/python3.11/site-packages/pandas/core/indexes/base.py", line 3812, in get_loc
-    raise KeyError(key) from err
+import streamlit as st
+import pandas as pd
+import os
+
+st.title("Dashboard Bromélias")
+st.write("Pesquisador: Flávio Santos")
+
+if not os.path.exists("campo.xlsx") or not os.path.exists("lab.xlsx"):
+    st.error("Arquivos não encontrados.")
+    st.stop()
+
+# Leitura simples dos arquivos
+df_campo = pd.read_excel("campo.xlsx", sheet_name=0)
+df_visitas = pd.read_excel("campo.xlsx", sheet_name="rep_visitas")
+df_lab = pd.read_excel("lab.xlsx", sheet_name=0)
+df_especies = pd.read_excel("lab.xlsx", sheet_name=1)
+
+# Cruza pela data para não dar erro de ID
+df_visitas["Data da visita"] = pd.to_datetime(df_visitas["Data da visita"], errors="coerce")
+df_lab["Data do processamento"] = pd.to_datetime(df_lab["Data do processamento"], errors="coerce")
+
+# Agrupa dados
+df_visitas = df_visitas.sort_values("Data da visita")
+df_lab = df_lab.sort_values("Data do processamento")
+
+df_merge = pd.merge_asof(
+    df_visitas, df_lab, 
+    left_on="Data da visita", right_on="Data do processamento", 
+    direction="nearest", tolerance=pd.Timedelta(days=15)
+)
+
+# Junta com espécies
+df_especies["Data do processamento"] = df_merge["Data do processamento"].iloc[0] if not df_merge.empty else None
+df_especies_final = pd.merge(df_especies, df_lab[["Data do processamento", "_id"]], on="_id", how="left")
+
+# Mostra os dados na tela para conferir
+st.subheader("Dados do Laboratório Carregados")
+st.dataframe(df_especies_final)
+
+st.subheader("Visitas e Datas")
+st.dataframe(df_visitas[["id_bromelia_visita", "Data da visita"]])
