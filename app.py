@@ -41,7 +41,7 @@ def baixar_formulario(uid, token, base_url):
         payload = response.json()
         registros.extend(payload.get("results", []))
         url = payload.get("next")
-        params = {}  # A URL da próxima página já contém seus próprios parâmetros.
+        params = {} 
 
     return registros
 
@@ -110,39 +110,8 @@ def linhas_especies(registro_lab):
     return []
 
 
-def classificar_resultado(registro_lab):
-    chaves = [
-        "grp_amostra/resultado_geral",
-        "resultado_geral",
-        "grp_amostra/resultado_amostra",
-        "resultado_amostra",
-        "grp_amostra/resultado_final",
-        "resultado_final",
-    ]
-    valor = primeiro_valor(registro_lab, chaves)
-
-    # Fallback: encontra campos cujo nome indique resultado geral da amostra.
-    if valor is None and isinstance(registro_lab, dict):
-        for chave, candidato in registro_lab.items():
-            nome = normalizar_texto(chave)
-            if "resultado" in nome and ("geral" in nome or "amostra" in nome):
-                valor = candidato
-                break
-
-    texto = normalizar_texto(valor)
-    if "inconclus" in texto:
-        return "inconclusivo"
-    if "nao process" in texto:
-        return "nao_processado"
-    if "positiv" in texto:
-        return "positivo"
-    if "negativ" in texto:
-        return "negativo"
-    return "desconhecido"
-
-
 def extrair_analise(registro_lab):
-    """Resume uma análise laboratorial, incluindo larvas, pupas e adultos emergidos."""
+    """Resume uma análise laboratorial, incluindo larvas e pupas."""
     codigo = normalizar_codigo(
         primeiro_valor(
             registro_lab,
@@ -155,7 +124,6 @@ def extrair_analise(registro_lab):
     especies = []
     detalhes = []
     total = 0
-    campo_adultos_encontrado = False
 
     for linha in linhas_especies(registro_lab):
         especie_original = primeiro_valor(
@@ -164,6 +132,7 @@ def extrair_analise(registro_lab):
         )
         especie = normalizar_texto(especie_original).replace(" ", "_")
 
+        # Conta apenas larvas e pupas
         qtd_larvas, _ = ler_contagem(
             linha,
             ["rep_especies/qtd_larvas", "qtd_larvas", "quantidade_larvas"],
@@ -174,25 +143,10 @@ def extrair_analise(registro_lab):
             ["rep_especies/qtd_pupas", "qtd_pupas", "quantidade_pupas"],
             ("pupa",),
         )
-        qtd_adultos, adulto_localizado = ler_contagem(
-            linha,
-            [
-                "rep_especies/qtd_adultos_emergidos",
-                "qtd_adultos_emergidos",
-                "rep_especies/quantidade_adultos_emergidos",
-                "quantidade_adultos_emergidos",
-                "adultos_emergidos",
-                "qtd_adultos",
-                "quantidade_adultos",
-            ],
-            ("adult",),
-        )
-        campo_adultos_encontrado = campo_adultos_encontrado or adulto_localizado
 
-        subtotal = qtd_larvas + qtd_pupas + qtd_adultos
+        subtotal = qtd_larvas + qtd_pupas
         total += subtotal
 
-        # Não cria uma espécie fictícia para uma linha de repetição inteiramente vazia.
         if especie:
             especies.append(especie)
             detalhes.append(
@@ -213,28 +167,14 @@ def extrair_analise(registro_lab):
                 }
             )
 
-    resultado = classificar_resultado(registro_lab)
     aedes = any("aedes" in especie for especie in especies)
-
-    # Positividade é avaliada somente em amostras com resultado positivo/negativo.
-    # Se o formulário não trouxer esse campo, uma linha de espécie preenchida serve
-    # como evidência de processamento; inconclusivo/não processado ficam excluídos.
-    if resultado in {"positivo", "negativo"}:
-        avaliada = True
-    elif resultado in {"inconclusivo", "nao_processado"}:
-        avaliada = False
-    else:
-        avaliada = bool(especies or total > 0)
 
     return {
         "codigo_amostra": codigo,
         "especies": list(dict.fromkeys(especies)),
         "qtd_especimes": total,
         "positivo": aedes,
-        "avaliada": avaliada,
-        "resultado_lab": resultado,
         "detalhes": detalhes,
-        "campo_adultos_encontrado": campo_adultos_encontrado,
     }
 
 
@@ -261,7 +201,6 @@ for indice, item in enumerate(lista_campo):
         ["grp_cadastro/id_bromelia_calc", "id_bromelia_calc", "codigo_planta"],
     )
     if id_planta is None:
-        # Evita agrupar todas as plantas sem ID sob o mesmo valor "Sem ID".
         id_planta = f"SEM-ID-{item.get('_id', indice)}"
     id_planta = str(id_planta).strip()
 
@@ -316,26 +255,14 @@ for indice, item in enumerate(lista_campo):
                             {"id_bromelia": id_planta, "codigo_amostra": codigo}
                         )
 
-# Um cadastro de planta pode aparecer em mais de um envio/visita: manter uma linha.
 df_plantas = pd.DataFrame(plantas)
 df_plantas = df_plantas.drop_duplicates(subset=["id_bromelia"], keep="last")
 
-# Cada código de amostra deve apontar para uma única planta.
 df_amostras = pd.DataFrame(amostras, columns=["id_bromelia", "codigo_amostra"])
 if not df_amostras.empty:
-    conflitos = (
-        df_amostras.groupby("codigo_amostra")["id_bromelia"].nunique().loc[lambda s: s > 1]
-    )
-    if not conflitos.empty:
-        st.warning(
-            "Há códigos de amostra associados a mais de uma planta. "
-            "Revise estes códigos no KoboToolbox: " + ", ".join(conflitos.index.astype(str))
-        )
     df_amostras = df_amostras.drop_duplicates(subset=["codigo_amostra"], keep="first")
 
 # --- PROCESSAMENTO DOS DADOS LABORATORIAIS ---
-# O código de amostra é único no esquema proposto; se houver reenvio duplicado,
-# considera-se o registro mais recente recebido para não multiplicar as contagens.
 analises_por_codigo = {}
 for item in lista_lab:
     analise = extrair_analise(item)
@@ -347,15 +274,7 @@ df_lab = pd.DataFrame(
         {k: v for k, v in analise.items() if k != "detalhes"}
         for analise in analises_por_codigo.values()
     ],
-    columns=[
-        "codigo_amostra",
-        "especies",
-        "qtd_especimes",
-        "positivo",
-        "avaliada",
-        "resultado_lab",
-        "campo_adultos_encontrado",
-    ],
+    columns=["codigo_amostra", "especies", "qtd_especimes", "positivo"],
 )
 df_lab_detalhes = pd.DataFrame(
     [
@@ -366,16 +285,7 @@ df_lab_detalhes = pd.DataFrame(
     columns=["codigo_amostra", "especie", "qtd_especimes"],
 )
 
-if analises_por_codigo and not any(
-    analise["campo_adultos_encontrado"] for analise in analises_por_codigo.values()
-):
-    st.warning(
-        "Não encontrei o campo de adultos emergidos nos registros recebidos. "
-        "Verifique o nome interno desse campo no KoboToolbox e ajuste os nomes "
-        "em `extrair_analise()` se necessário."
-    )
-
-# --- CRUZAMENTO SEM DUPLICAR AMOSTRAS OU PLANTAS ---
+# --- CRUZAMENTO ---
 if not df_amostras.empty and not df_lab.empty:
     df_merge = pd.merge(
         df_amostras,
@@ -398,13 +308,12 @@ if not df_amostras.empty and not df_lab.empty:
                 ),
                 "qtd_especimes": "sum",
                 "positivo": "max",
-                "avaliada": "max",
             }
         )
     )
 else:
     df_por_planta = pd.DataFrame(
-        columns=["id_bromelia", "especies", "qtd_especimes", "positivo", "avaliada"]
+        columns=["id_bromelia", "especies", "qtd_especimes", "positivo"]
     )
 
 df_final = pd.merge(df_plantas, df_por_planta, on="id_bromelia", how="left")
@@ -419,7 +328,6 @@ df_final["qtd_especimes"] = pd.to_numeric(
     df_final.get("qtd_especimes", 0), errors="coerce"
 ).fillna(0)
 df_final["positivo"] = df_final.get("positivo", False).fillna(False).astype(bool)
-df_final["avaliada"] = df_final.get("avaliada", False).fillna(False).astype(bool)
 df_final["especie_str"] = df_final["especies"].apply(
     lambda lista: ", ".join(lista) if lista else "Não informado"
 )
@@ -428,31 +336,19 @@ df_final["especie_str"] = df_final["especie_str"].str.replace("_", " ").str.capi
 # --- MÉTRICAS ---
 n_plantas = int(df_final["id_bromelia"].nunique())
 total_especimes = int(df_final["qtd_especimes"].sum())
-df_avaliadas = df_final[df_final["avaliada"]]
-n_plantas_avaliadas = int(df_avaliadas["id_bromelia"].nunique())
-plantas_positivas = int(
-    df_avaliadas.loc[df_avaliadas["positivo"], "id_bromelia"].nunique()
-)
+plantas_positivas = int(df_final.loc[df_final["positivo"], "id_bromelia"].nunique())
 positividade = (
-    plantas_positivas / n_plantas_avaliadas * 100
-    if n_plantas_avaliadas > 0
+    plantas_positivas / n_plantas * 100
+    if n_plantas > 0
     else 0
 )
 
 st.markdown("### 📊 Indicadores")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Plantas cadastradas", n_plantas)
-c2.metric("Espécimes (Lab)", total_especimes)
-c3.metric(
-    "Plantas positivas",
-    plantas_positivas,
-    help=f"Contagem de plantas com Aedes identificado. Plantas com resultado positivo/negativo válido: {n_plantas_avaliadas}.",
-)
-c4.metric(
-    "Positividade entre avaliadas",
-    f"{positividade:.1f}%",
-    help=f"{plantas_positivas} planta(s) positiva(s) de {n_plantas_avaliadas} planta(s) com resultado laboratorial avaliável. Inconclusivas, não processadas e sem análise ficam fora do denominador.",
-)
+c2.metric("Espécimes (Larvas + Pupas)", total_especimes)
+c3.metric("Plantas positivas (Aedes)", plantas_positivas)
+c4.metric("Positividade", f"{positividade:.1f}%")
 
 st.markdown("---")
 
@@ -480,12 +376,9 @@ if not df_mapa.empty:
             ).add_to(mapa)
             cor = "red"
             resultado_mapa = f"POSITIVO ({linha['especie_str']})"
-        elif linha["avaliada"]:
-            cor = "blue"
-            resultado_mapa = "Sem Aedes detectado na análise"
         else:
-            cor = "gray"
-            resultado_mapa = "Sem resultado laboratorial avaliável"
+            cor = "blue"
+            resultado_mapa = "Sem Aedes detectado"
 
         folium.Marker(
             location=[linha["lat"], linha["lon"]],
@@ -526,7 +419,7 @@ if not df_lab_detalhes.empty:
             df_chart.rename(
                 columns={
                     "especie": "Espécie",
-                    "qtd_especimes": "Larvas + pupas + adultos emergidos",
+                    "qtd_especimes": "Larvas + Pupas",
                 }
             ),
             hide_index=True,
