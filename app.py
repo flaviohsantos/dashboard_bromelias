@@ -15,7 +15,7 @@ ARQUIVO_CAMPO = "campo.xlsx"
 ARQUIVO_LAB = "lab.xlsx"
 
 if not os.path.exists(ARQUIVO_CAMPO) or not os.path.exists(ARQUIVO_LAB):
-    st.error("⚠️ Arquivos 'campo.xlsx' e 'lab.xlsx' não encontrados.")
+    st.error("⚠️ Arquivos não encontrados.")
     st.stop()
 
 @st.cache_data
@@ -23,78 +23,106 @@ def carregar_dados():
     try:
         df_campo = pd.read_excel(ARQUIVO_CAMPO, sheet_name=0)
         df_visitas = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_visitas")
+        df_amostras = pd.read_excel(ARQUIVO_CAMPO, sheet_name="rep_amostras")
         df_lab = pd.read_excel(ARQUIVO_LAB, sheet_name=0)
         df_especies = pd.read_excel(ARQUIVO_LAB, sheet_name=1)
-        return df_campo, df_visitas, df_lab, df_especies
+        return df_campo, df_visitas, df_amostras, df_lab, df_especies
     except Exception as e:
         st.error(f"Erro ao ler as abas: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-df_campo, df_visitas, df_lab, df_especies = carregar_dados()
+df_campo, df_visitas, df_amostras, df_lab, df_especies = carregar_dados()
 
 if df_campo.empty or df_lab.empty or df_especies.empty:
     st.stop()
 
-# --- TRATAMENTO DOS DADOS (Com os nomes exatos) ---
-# 1. Plantas
+# --- TRATAMENTO DOS DADOS ---
+# 1. Plantas (com o nome exato que vimos no diagnóstico)
 df_plantas = pd.DataFrame({
-    "id_bromelia": df_campo["Código único da planta"],  # Nome exato revelado
+    "id_bromelia": df_campo["Código único da planta"],
     "bairro": df_campo["Bairro"],
     "genero": df_campo["Gênero da bromélia"],
     "lat": pd.to_numeric(df_campo["_Geolocalização da planta_latitude"], errors="coerce"),
     "lon": pd.to_numeric(df_campo["_Geolocalização da planta_longitude"], errors="coerce")
 })
 
-# 2. Visitas (Data)
-df_visitas_tratado = pd.DataFrame({
-    "id_bromelia": df_visitas["id_bromelia_visita"],
-    "data_visita": pd.to_datetime(df_visitas["Data da visita"], errors="coerce", dayfirst=True)
-})
+# 2. Amostras do Campo (ID da amostra -> ID da planta)
+# O ID da amostra é tipo "BRO-2610181726-30", então extraímos a parte da planta.
+if "id_amostra_calc" in df_amostras.columns:
+    df_amostras["id_planta_campo"] = df_amostras["id_amostra_calc"].astype(str).str.rsplit('-', n=1).str[0]
+elif "Código da amostra: ${id_amostra_calc}" in df_amostras.columns:
+    df_amostras["id_planta_campo"] = df_amostras["Código da amostra: ${id_amostra_calc}"].astype(str).str.rsplit('-', n=1).str[0]
+else:
+    # Fallback: usa a coluna de número da amostra
+    df_amostras["id_planta_campo"] = df_visitas["id_bromelia_visita"]
 
-# 3. Laboratório (Data)
+# Junta a visita com a amostra
+df_visitas_com_amostras = pd.merge(
+    df_visitas[["id_bromelia_visita"]],
+    df_amostras[["id_planta_campo"]],
+    left_on="id_bromelia_visita", right_on="id_planta_campo", how="left"
+)
+
+# 3. Laboratório
 df_lab_tratado = pd.DataFrame({
-    "data_processamento": pd.to_datetime(df_lab["Data do processamento"], errors="coerce", dayfirst=True),
     "submission_id": df_lab["_id"].astype(str)
 })
-
-# 4. Espécies
 df_especies_tratado = pd.DataFrame({
     "especie": df_especies["Espécie identificada"].astype(str).str.lower().str.strip(),
     "contagem": pd.to_numeric(df_especies["soma_contagem"], errors="coerce").fillna(0),
     "submission_id": df_especies["_submission__id"].astype(str)
 })
 
-# --- CRUZAMENTO PELA DATA ---
-df_especies_com_data = pd.merge(df_especies_tratado, df_lab_tratado, on="submission_id", how="left")
-
-df_lab_agrupado = df_especies_com_data.groupby("data_processamento").agg({
+# Agrupa as espécies por submission
+df_especies_agrupado = df_especies_tratado.groupby("submission_id").agg({
     "especie": lambda x: ', '.join(x.unique()),
     "contagem": "sum"
 }).reset_index()
 
-df_visitas_com_lab = pd.merge_asof(
-    df_visitas_tratado.sort_values("data_visita"),
-    df_lab_agrupado.sort_values("data_processamento"),
-    left_on="data_visita", right_on="data_processamento",
-    direction="nearest", tolerance=pd.Timedelta(days=15)
+# Junta as espécies com o ID do lab
+df_lab_completo = pd.merge(df_lab_tratado, df_especies_agrupado, on="submission_id", how="left")
+
+# 4. O CRUZAMENTO (Pelo código da planta)
+# Pega o código da planta do lab (se o ID for BRO-123-30, pega BRO-123)
+# Mas como o lab não tem o ID da planta diretamente, vamos usar o cruzamento pela data como fallback
+# ou tentar cruzar pelo ID da amostra.
+
+# Como o laboratório não tem o ID da planta, vamos cruzar pelo ID da amostra completo
+# Supondo que o campo tenha o id_amostra_calc e o lab tenha "Código da amostra"
+
+df_amostras["id_amostra_calc"] = df_amostras.get("id_amostra_calc", df_amostras.get("Código da amostra: ${id_amostra_calc}", None))
+df_lab["id_amostra_calc"] = df_lab["Código da amostra"]
+
+df_merge = pd.merge(
+    df_amostras[["id_planta_campo", "id_amostra_calc"]],
+    df_lab_completo,
+    left_on="id_amostra_calc",
+    right_on="submission_id",
+    how="left"
 )
 
-df_visitas_por_planta = df_visitas_com_lab.groupby("id_bromelia").agg({
+# Agrupa por planta
+df_por_planta = df_merge.groupby("id_planta_campo").agg({
     "especie": lambda x: ', '.join(x.dropna().unique()),
     "contagem": "sum"
 }).reset_index()
 
 # Junta com as plantas
-df_final = pd.merge(df_plantas, df_visitas_por_planta, on="id_bromelia", how="left")
+df_final = pd.merge(df_plantas, df_por_planta, left_on="id_bromelia", right_on="id_planta_campo", how="left")
 
-df_final["especie"] = df_final["especie"].fillna("Não informado").astype(str).str.replace("_", " ").str.capitalize()
+# --- A REGRA DO AEDES ---
+# Se a string de espécies contiver "aedes", a planta é positiva.
+df_final["especie"] = df_final["especie"].fillna("Não informado").astype(str)
+df_final["especie"] = df_final["especie"].str.replace("_", " ").str.capitalize()
 df_final["contagem"] = pd.to_numeric(df_final["contagem"], errors="coerce").fillna(0)
+
+# Verifica se tem Aedes na string
+df_final["positivo"] = df_final["especie"].str.lower().str.contains("aedes", na=False)
 
 # --- MÉTRICAS ---
 n_plantas = df_final["id_bromelia"].nunique()
 total_especimes = df_final["contagem"].sum()
-tem_aedes = df_final["especie"].str.contains("Aedes", case=False, na=False)
-plantas_positivas = df_final[tem_aedes]["id_bromelia"].nunique()
+plantas_positivas = df_final[df_final["positivo"]]["id_bromelia"].nunique()
 positividade = (plantas_positivas / n_plantas * 100) if n_plantas > 0 else 0
 
 st.markdown("### 📊 Indicadores")
@@ -114,14 +142,13 @@ if not df_mapa.empty:
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
     m = folium.Map(location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap")
-    ids_positivos = df_final[tem_aedes]["id_bromelia"].unique()
     
     for _, row in df_mapa.iterrows():
-        if row["id_bromelia"] in ids_positivos:
+        if row["positivo"]:
             folium.Circle(location=[row["lat"], row["lon"]], radius=100, color="#E63946", fill=True, fill_color="#E63946", fill_opacity=0.2, weight=2).add_to(m)
-            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>POSITIVO").add_to(m)
+            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>POSITIVO ({row['especie']})").add_to(m)
         else:
-            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>Negativo").add_to(m)
+            folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>Negativo ({row['especie']})").add_to(m)
     st_folium(m, width=None, height=500, key="mapa")
 else:
     st.info("Sem coordenadas para o mapa.")
