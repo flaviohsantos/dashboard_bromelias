@@ -186,7 +186,8 @@ if not df_mapa.empty:
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
     
-    tab1, tab2 = st.tabs(["📍 Mapa Base e Raio (100m)", "🔥 Mapa de Calor (Apenas Focos)"])
+    # Cria as 3 abas
+    tab1, tab2, tab3 = st.tabs(["📍 Mapa Base e Raio (100m)", "🔥 Mapa de Calor (Apenas Focos)", "🌐 Mapa de Agrupamento (Clusters)"])
     
     with tab1:
         col_mapa, col_termo = st.columns([3, 1])
@@ -216,7 +217,7 @@ if not df_mapa.empty:
             fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(fig_termo, use_container_width=True)
             
-        # --- ABA 2: MAPA DE CALOR ---
+    # --- ABA 2: MAPA DE CALOR ---
     with tab2:
         st.markdown("#### 🔥 Mapa de Calor (Focos Positivos)")
         
@@ -244,6 +245,41 @@ if not df_mapa.empty:
             st.plotly_chart(fig_mapa_calor, use_container_width=True)
         else:
             st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
+    
+    # --- ABA 3: MAPA DE AGRUPAMENTO (CLUSTERS) ---
+    with tab3:
+        st.markdown("#### 🌐 Agrupamento de Plantas por Proximidade")
+        
+        # Cria uma coluna de "contagem" para o tamanho da bolha
+        df_agrupado = df_mapa.groupby(["lat", "lon", "positivo"]).size().reset_index(name="quantidade")
+        
+        if not df_agrupado.empty:
+            # Cria o mapa de bolhas usando Plotly
+            fig_cluster = px.scatter_mapbox(
+                df_agrupado, 
+                lat="lat", 
+                lon="lon", 
+                size="quantidade", 
+                color="positivo",
+                color_discrete_map={True: "#E63946", False: "#2E86AB"},
+                hover_name="quantidade",
+                center=dict(lat=centro_lat, lon=centro_lon),
+                zoom=15,
+                mapbox_style="open-street-map",
+                size_max=40 # Tamanho máximo da bolha
+            )
+            
+            fig_cluster.update_layout(
+                margin=dict(l=0, r=0, t=0, b=0), 
+                height=450,
+                legend_title_text="Status"
+            )
+            
+            st.plotly_chart(fig_cluster, use_container_width=True)
+            st.info("O tamanho da bolha indica quantas plantas foram cadastradas naquela coordenada exata.")
+        else:
+            st.info("Sem dados para agrupar.")
+        
 else:
     st.info("Sem coordenadas para o mapa.")
 
