@@ -15,7 +15,7 @@ st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.caption(f"Pesquisador: Flávio Santos (IOC - Fiocruz) | Atualizado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 st.markdown("---")
 
-# --- FUNÇÕES AUXILIARES (API e Tratamento) ---
+# --- FUNÇÕES AUXILIARES ---
 def _get_secret(key, default=""):
     try: return st.secrets[key]
     except: return os.environ.get(key, default)
@@ -51,7 +51,7 @@ def numero_inteiro(valor):
     try: return max(0, int(float(str(valor).strip().replace(",", "."))))
     except: return 0
 
-# --- CARREGAMENTO DA API ---
+# --- CARREGAMENTO ---
 base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
 token = _get_secret("KOBO_TOKEN")
 uid_campo = _get_secret("UID_CAMPO")
@@ -65,7 +65,7 @@ if not lista_campo:
     st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# --- PROCESSAMENTO DE PLANTAS, VISITAS E AMOSTRAS ---
+# --- PROCESSAMENTO ---
 plantas = []
 visitas_list = []
 amostras = []
@@ -106,7 +106,6 @@ for indice, item in enumerate(lista_campo):
                     if cod:
                         amostras.append({"id_bromelia": id_planta, "codigo_amostra": str(cod).strip()})
 
-# --- PROCESSAMENTO DO LABORATÓRIO ---
 lab_especies = []
 for item in lista_lab:
     cod_lab = item.get("grp_amostra/codigo_amostra")
@@ -128,7 +127,6 @@ df_visitas = pd.DataFrame(visitas_list)
 df_amostras = pd.DataFrame(amostras).drop_duplicates(subset=["codigo_amostra"])
 df_lab = pd.DataFrame(lab_especies)
 
-# --- CRUZAMENTO FINAL ---
 if not df_amostras.empty and not df_lab.empty:
     df_merge = pd.merge(df_amostras, df_lab, on="codigo_amostra", how="left")
     df_por_planta = df_merge.groupby("id_bromelia").agg({
@@ -146,7 +144,7 @@ df_final["especie_str"] = df_final["especie"].apply(lambda x: ', '.join(x) if is
 df_final["qtd_especimes"] = pd.to_numeric(df_final["qtd_especimes"], errors="coerce").fillna(0)
 
 # ==========================================
-# LAYOUT DO DASHBOARD
+# LAYOUT
 # ==========================================
 
 # 1. INDICADORES
@@ -164,81 +162,95 @@ c4.metric("Positividade", f"{positividade:.1f}%")
 
 st.markdown("---")
 
-# 2. MAPAS (COM ABAS: BASE E CALOR)
-st.markdown("### 🗺️ Mapas de Risco Georreferenciados")
+# 2. MÉDIAS DA ÁGUA (NOVO LOCAL: LOGO ABAIXO DOS INDICADORES)
+st.markdown("### 💧 Médias da Água")
+if not df_visitas.empty:
+    df_visitas["ph"] = pd.to_numeric(df_visitas["ph"], errors="coerce")
+    df_visitas["temp"] = pd.to_numeric(df_visitas["temp"], errors="coerce")
+    df_visitas["vol"] = pd.to_numeric(df_visitas["vol"], errors="coerce")
+    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("pH Médio", f"{df_visitas['ph'].mean():.1f}" if not df_visitas['ph'].isna().all() else "—")
+    m2.metric("Temperatura Média", f"{df_visitas['temp'].mean():.1f} °C" if not df_visitas['temp'].isna().all() else "—")
+    m3.metric("Volume Médio", f"{df_visitas['vol'].mean():.0f} mL" if not df_visitas['vol'].isna().all() else "—")
+else:
+    st.info("Sem dados de água.")
+
+st.markdown("---")
+
+# 3. MAPAS E TERMÔMETRO
+st.markdown("### 🗺️ Mapas de Risco e Termômetro")
 df_mapa = df_final.dropna(subset=["lat", "lon"])
 
 if not df_mapa.empty:
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
     
-    # Cria as abas
     tab1, tab2 = st.tabs(["📍 Mapa Base e Raio (100m)", "🔥 Mapa de Calor (Apenas Focos)"])
     
-    # --- ABA 1: MAPA BASE COM RAIO ---
     with tab1:
-        m1 = folium.Map(location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap")
-        for _, row in df_mapa.iterrows():
-            if row["positivo"]:
-                folium.Circle(location=[row["lat"], row["lon"]], radius=100, color="#E63946", fill=True, fill_opacity=0.2, weight=2).add_to(m1)
-                folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>POSITIVO").add_to(m1)
-            else:
-                folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>Negativo").add_to(m1)
-        st_folium(m1, width=None, height=500, key="mapa1")
+        col_mapa, col_termo = st.columns([3, 1])
         
-    # --- ABA 2: MAPA DE CALOR ---
+        with col_mapa:
+            m1 = folium.Map(location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap")
+            for _, row in df_mapa.iterrows():
+                if row["positivo"]:
+                    folium.Circle(location=[row["lat"], row["lon"]], radius=100, color="#E63946", fill=True, fill_opacity=0.2, weight=2).add_to(m1)
+                    folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="red", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>POSITIVO").add_to(m1)
+                else:
+                    folium.Marker(location=[row["lat"], row["lon"]], icon=folium.Icon(color="blue", icon="info-sign"), popup=f"<b>{row['id_bromelia']}</b><br>Negativo").add_to(m1)
+            st_folium(m1, width=None, height=450, key="mapa1")
+            
+        with col_termo:
+            st.markdown("#### 🌡️ Termômetro")
+            if positividade < 15: cor, st_risco = "#2E86AB", "BAIXO"
+            elif positividade < 40: cor, st_risco = "#F4A261", "MÉDIO"
+            else: cor, st_risco = "#E63946", "ALTO"
+            
+            fig_termo = go.Figure(go.Indicator(
+                mode="gauge+number", value=positividade, number={'suffix': "%"},
+                title={'text': st_risco},
+                gauge={'axis': {'range': [0, 100]}, 'bar': {'color': cor},
+                       'steps': [{'range': [0, 15], 'color': '#D6EAF8'}, {'range': [15, 40], 'color': '#FDEBD0'}, {'range': [40, 100], 'color': '#FADBD8'}]}
+            ))
+            fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
+            st.plotly_chart(fig_termo, use_container_width=True)
+            
     with tab2:
-        # Usa um fundo escuro para o calor brilhar mais
-        m2 = folium.Map(location=[centro_lat, centro_lon], zoom_start=15, tiles="CartoDB dark_matter")
-        
-        # Filtra apenas as plantas positivas para gerar o calor
+        # CORREÇÃO: Fundo claro para não pedir API Key
+        m2 = folium.Map(location=[centro_lat, centro_lon], zoom_start=15, tiles="OpenStreetMap")
         df_calor = df_mapa[df_mapa["positivo"]]
         
         if not df_calor.empty:
             from folium.plugins import HeatMap
             heat_data = [[r["lat"], r["lon"]] for _, r in df_calor.iterrows()]
             HeatMap(heat_data, radius=40, blur=25, min_opacity=0.8).add_to(m2)
-            st_folium(m2, width=None, height=500, key="mapa2")
+            st_folium(m2, width=None, height=450, key="mapa2")
         else:
-            st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
+            st.info("Nenhuma planta positiva para gerar o mapa de calor.")
 else:
     st.info("Sem coordenadas para o mapa.")
 
-# 3. SÉRIE TEMPORAL E MICROCLIMA
+# 4. SÉRIE TEMPORAL
 st.markdown("---")
-col_serie, col_clima = st.columns([2, 1])
+st.markdown("### 📈 Série Temporal de Coletas")
+if not df_visitas.empty and "data_visita" in df_visitas.columns:
+    df_serie = df_visitas.copy()
+    df_serie["data_visita"] = pd.to_datetime(df_serie["data_visita"], errors="coerce")
+    df_serie["mes"] = df_serie["data_visita"].dt.to_period("M").astype(str)
+    contagem = df_serie.groupby("mes").agg(
+        visitas=("data_visita", "count"),
+        amostras=("id_bromelia", "count")
+    ).reset_index()
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=contagem["mes"], y=contagem["visitas"], name="Visitas", marker_color="#2E86AB"))
+    fig.update_layout(barmode="group", height=350, margin=dict(l=10, r=10, t=30, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("Sem dados de visitas.")
 
-with col_serie:
-    st.markdown("### 📈 Série Temporal de Coletas")
-    if not df_visitas.empty and "data_visita" in df_visitas.columns:
-        df_serie = df_visitas.copy()
-        df_serie["data_visita"] = pd.to_datetime(df_serie["data_visita"], errors="coerce")
-        df_serie["mes"] = df_serie["data_visita"].dt.to_period("M").astype(str)
-        contagem = df_serie.groupby("mes").agg(
-            visitas=("data_visita", "count"),
-            amostras=("id_bromelia", "count")
-        ).reset_index()
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=contagem["mes"], y=contagem["visitas"], name="Visitas", marker_color="#2E86AB"))
-        fig.update_layout(barmode="group", height=350, margin=dict(l=10, r=10, t=30, b=10))
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Sem dados de visitas.")
-
-with col_clima:
-    st.markdown("### 💧 Médias da Água")
-    if not df_visitas.empty:
-        df_visitas["ph"] = pd.to_numeric(df_visitas["ph"], errors="coerce")
-        df_visitas["temp"] = pd.to_numeric(df_visitas["temp"], errors="coerce")
-        df_visitas["vol"] = pd.to_numeric(df_visitas["vol"], errors="coerce")
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("pH Médio", f"{df_visitas['ph'].mean():.1f}" if not df_visitas['ph'].isna().all() else "—")
-        m2.metric("Temperatura", f"{df_visitas['temp'].mean():.1f}°C" if not df_visitas['temp'].isna().all() else "—")
-        m3.metric("Volume", f"{df_visitas['vol'].mean():.0f} mL" if not df_visitas['vol'].isna().all() else "—")
-
-# 4. GRÁFICO DE ESPÉCIES E ANÁLISE DA ÁGUA
+# 5. ESPÉCIES E ANÁLISE DE ÁGUA
 st.markdown("---")
 col_esp, col_agua = st.columns([2, 1])
 
@@ -251,8 +263,6 @@ with col_esp:
         fig = px.bar(df_chart, x="especie", y="qtd_especimes", text="qtd_especimes", color="especie")
         fig.update_layout(showlegend=False, height=400, margin=dict(l=10, r=10, t=30, b=10))
         st.plotly_chart(fig, use_container_width=True)
-        
-        st.dataframe(df_chart.rename(columns={"especie": "Espécie", "qtd_especimes": "Larvas+Pupas"}), hide_index=True)
     else:
         st.info("Nenhuma larva registrada.")
 
@@ -263,7 +273,7 @@ with col_agua:
         fig_ph.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="")
         st.plotly_chart(fig_ph, use_container_width=True)
 
-# 5. NOTAS DE CAMPO
+# 6. NOTAS
 st.markdown("---")
 st.markdown("### 📝 Notas e Intercorrências de Campo")
 if not df_visitas.empty:
