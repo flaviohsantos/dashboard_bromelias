@@ -203,6 +203,83 @@ if not df_visitas.empty:
     m2.metric("Temperatura Média", f"{df_visitas['temp'].mean():.1f} °C" if not df_visitas['temp'].isna().all() else "—")
     m3.metric("Volume Médio", f"{df_visitas['vol'].mean():.0f} mL" if not df_visitas['vol'].isna().all() else "—")
 
+# 13. AMOSTRAS PENDENTES DE ANÁLISE
+st.markdown("---")
+st.markdown("### ⏳ Amostras Pendentes de Análise (Coletadas mas não Processadas)")
+
+# ⚠️ SUBSTITUA ESTE LINK PELO LINK DO SEU FORMULÁRIO DE LABORATÓRIO NO KOBO
+URL_FORMULARIO_LAB = "https://ee.kobotoolbox.org/AtOwQDsP"
+
+if not df_amostras.empty:
+    # 1. Junta as amostras com as datas de visita
+    df_pendentes = pd.merge(df_amostras, df_visitas[["id_bromelia", "data_visita"]], on="id_bromelia", how="left")
+    
+    # 2. Verifica quais amostras já têm resultado no lab
+    codigos_com_resultado = df_lab["codigo_amostra"].unique() if not df_lab.empty else []
+    df_pendentes["Analisada"] = df_pendentes["codigo_amostra"].isin(codigos_com_resultado)
+    
+    # 3. Filtra apenas as que NÃO foram analisadas
+    df_apenas_pendentes = df_pendentes[~df_pendentes["Analisada"]].copy()
+    
+    if not df_apenas_pendentes.empty:
+        # Calcula os dias de espera
+        df_apenas_pendentes["data_visita"] = pd.to_datetime(df_apenas_pendentes["data_visita"], errors="coerce")
+        df_apenas_pendentes["Dias de Espera"] = (datetime.now() - df_apenas_pendentes["data_visita"]).dt.days
+        
+        # Remove duplicatas
+        df_apenas_pendentes = df_apenas_pendentes.drop_duplicates(subset=["codigo_amostra"])
+        
+        # Prepara a tabela
+        df_exibicao = df_apenas_pendentes[["codigo_amostra", "id_bromelia", "data_visita", "Dias de Espera"]].copy()
+        df_exibicao["data_visita"] = df_exibicao["data_visita"].dt.strftime('%d/%m/%Y')
+        
+        # Cria a coluna com o link do formulário
+        df_exibicao["Ação"] = URL_FORMULARIO_LAB
+        
+        # Renomeia as colunas
+        df_exibicao = df_exibicao.rename(columns={
+            "codigo_amostra": "Código da Amostra",
+            "id_bromelia": "Planta",
+            "data_visita": "Data da Coleta",
+            "Dias de Espera": "Dias de Espera",
+            "Ação": "Ação"
+        })
+        
+        # Ordena pelos mais antigos
+        df_exibicao = df_exibicao.sort_values(by="Dias de Espera", ascending=False)
+        
+        # Mostra a tabela com o link clicável
+        st.dataframe(
+            df_exibicao[["Código da Amostra", "Planta", "Data da Coleta", "Dias de Espera", "Ação"]],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Ação": st.column_config.LinkColumn(
+                    "Ação",
+                    display_text="🔬 Analisar"
+                )
+            }
+        )
+        
+        # Alerta de atraso
+        if df_exibicao["Dias de Espera"].max() > 30:
+            st.warning(f"⚠️ Existem amostras com mais de 30 dias de espera! A mais antiga está aguardando há {df_exibicao['Dias de Espera'].max()} dias.")
+        else:
+            st.info("✅ Todas as amostras pendentes foram coletadas há menos de 30 dias.")
+            
+        # Botão de download
+        csv_pendentes = df_exibicao.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Baixar Lista de Pendências (CSV)",
+            data=csv_pendentes,
+            file_name='amostras_pendentes.csv',
+            mime='text/csv',
+        )
+    else:
+        st.success("🎉 Todas as amostras coletadas já foram analisadas no laboratório!")
+else:
+    st.info("Ainda não há amostras coletadas para verificar.")
+
 st.markdown("---")
 
 # 3. MAPAS E TERMÔMETRO
@@ -437,82 +514,7 @@ if not df_lab.empty and not df_final.empty and "genero" in df_final.columns:
         fig_disp.update_layout(height=450, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig_disp, use_container_width=True)
 
-# 13. AMOSTRAS PENDENTES DE ANÁLISE
-st.markdown("---")
-st.markdown("### ⏳ Amostras Pendentes de Análise (Coletadas mas não Processadas)")
 
-# ⚠️ SUBSTITUA ESTE LINK PELO LINK DO SEU FORMULÁRIO DE LABORATÓRIO NO KOBO
-URL_FORMULARIO_LAB = "https://ee.kobotoolbox.org/AtOwQDsP"
-
-if not df_amostras.empty:
-    # 1. Junta as amostras com as datas de visita
-    df_pendentes = pd.merge(df_amostras, df_visitas[["id_bromelia", "data_visita"]], on="id_bromelia", how="left")
-    
-    # 2. Verifica quais amostras já têm resultado no lab
-    codigos_com_resultado = df_lab["codigo_amostra"].unique() if not df_lab.empty else []
-    df_pendentes["Analisada"] = df_pendentes["codigo_amostra"].isin(codigos_com_resultado)
-    
-    # 3. Filtra apenas as que NÃO foram analisadas
-    df_apenas_pendentes = df_pendentes[~df_pendentes["Analisada"]].copy()
-    
-    if not df_apenas_pendentes.empty:
-        # Calcula os dias de espera
-        df_apenas_pendentes["data_visita"] = pd.to_datetime(df_apenas_pendentes["data_visita"], errors="coerce")
-        df_apenas_pendentes["Dias de Espera"] = (datetime.now() - df_apenas_pendentes["data_visita"]).dt.days
-        
-        # Remove duplicatas
-        df_apenas_pendentes = df_apenas_pendentes.drop_duplicates(subset=["codigo_amostra"])
-        
-        # Prepara a tabela
-        df_exibicao = df_apenas_pendentes[["codigo_amostra", "id_bromelia", "data_visita", "Dias de Espera"]].copy()
-        df_exibicao["data_visita"] = df_exibicao["data_visita"].dt.strftime('%d/%m/%Y')
-        
-        # Cria a coluna com o link do formulário
-        df_exibicao["Ação"] = URL_FORMULARIO_LAB
-        
-        # Renomeia as colunas
-        df_exibicao = df_exibicao.rename(columns={
-            "codigo_amostra": "Código da Amostra",
-            "id_bromelia": "Planta",
-            "data_visita": "Data da Coleta",
-            "Dias de Espera": "Dias de Espera",
-            "Ação": "Ação"
-        })
-        
-        # Ordena pelos mais antigos
-        df_exibicao = df_exibicao.sort_values(by="Dias de Espera", ascending=False)
-        
-        # Mostra a tabela com o link clicável
-        st.dataframe(
-            df_exibicao[["Código da Amostra", "Planta", "Data da Coleta", "Dias de Espera", "Ação"]],
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Ação": st.column_config.LinkColumn(
-                    "Ação",
-                    display_text="🔬 Analisar"
-                )
-            }
-        )
-        
-        # Alerta de atraso
-        if df_exibicao["Dias de Espera"].max() > 30:
-            st.warning(f"⚠️ Existem amostras com mais de 30 dias de espera! A mais antiga está aguardando há {df_exibicao['Dias de Espera'].max()} dias.")
-        else:
-            st.info("✅ Todas as amostras pendentes foram coletadas há menos de 30 dias.")
-            
-        # Botão de download
-        csv_pendentes = df_exibicao.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Baixar Lista de Pendências (CSV)",
-            data=csv_pendentes,
-            file_name='amostras_pendentes.csv',
-            mime='text/csv',
-        )
-    else:
-        st.success("🎉 Todas as amostras coletadas já foram analisadas no laboratório!")
-else:
-    st.info("Ainda não há amostras coletadas para verificar.")
 
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
