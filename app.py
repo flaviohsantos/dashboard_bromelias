@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Dashboard — Bromélias Ornamentais Urbanas e Culicídeos."""
+import difflib
 import hmac
 import os
+import re
 import unicodedata
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -98,6 +100,11 @@ def numero_inteiro(valor):
         return 0
 
 
+def normalizar_codigo(valor):
+    """Padroniza códigos de amostra: sem espaços, maiúsculas, traços unificados."""
+    return re.sub(r"\s+", "", str(valor)).upper().replace("–", "-").replace("—", "-")
+
+
 def para_numero(serie):
     return pd.to_numeric(serie.astype(str).str.replace(",", ".", regex=False), errors="coerce")
 
@@ -120,6 +127,9 @@ if not check_password():
     st.stop()
 
 st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
+if st.sidebar.button("🔄 Atualizar dados agora"):
+    st.cache_data.clear()
+    st.rerun()
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.caption(f"Pesquisador: Flávio Santos (IOC - Fiocruz) | Atualizado em: {AGORA.strftime('%d/%m/%Y %H:%M')}")
 st.markdown("---")
@@ -182,7 +192,7 @@ for indice, item in enumerate(lista_campo):
                 if cod and str(cod).strip():
                     # A data da coleta fica junto da amostra (não é inferida depois pela planta)
                     amostras.append({"id_visita": id_visita, "id_bromelia": id_planta,
-                                     "codigo_amostra": str(cod).strip(), "data_visita": data_v})
+                                     "codigo_amostra": normalizar_codigo(cod), "data_visita": data_v})
 
 codigos_lab = set()   # amostras com formulário de laboratório preenchido (mesmo sem larvas)
 lab_especies = []
@@ -190,7 +200,7 @@ for item in lista_lab:
     cod_lab = item.get("grp_amostra/codigo_amostra")
     if not cod_lab or not str(cod_lab).strip():
         continue
-    cod_lab = str(cod_lab).strip()
+    cod_lab = normalizar_codigo(cod_lab)
     codigos_lab.add(cod_lab)
     for e in item.get("rep_especies", []) or []:
         especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
@@ -212,6 +222,7 @@ for col in ["ph", "temp", "vol"]:
     df_visitas[col] = para_numero(df_visitas[col])
 
 # Códigos do laboratório que não existem em nenhuma coleta (provável erro de digitação)
+df_amostras_todas = df_amostras.copy()
 codigos_lab_orfaos = sorted(codigos_lab - set(df_amostras["codigo_amostra"]))
 
 # --- BARRA LATERAL: CRITÉRIO E FILTRO DE DATA ---
@@ -369,7 +380,10 @@ else:
 
 if codigos_lab_orfaos:
     with st.expander(f"⚠️ {len(codigos_lab_orfaos)} código(s) do laboratório sem coleta correspondente"):
-        st.write(", ".join(codigos_lab_orfaos))
+        codigos_campo = sorted(set(df_amostras_todas["codigo_amostra"]))
+        for cod in codigos_lab_orfaos:
+            prox = difflib.get_close_matches(cod, codigos_campo, n=1, cutoff=0.6)
+            st.write(f"**{cod}** → código parecido no campo: {prox[0] if prox else 'nenhum'}")
 
 st.markdown("---")
 
