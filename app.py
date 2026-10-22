@@ -12,6 +12,33 @@ from streamlit_folium import st_folium
 from folium.plugins import HeatMap
 from streamlit_autorefresh import st_autorefresh
 
+# --- SISTEMA DE SENHA (BLOQUEIO) ---
+def check_password():
+    """Retorna True se o usuário digitou a senha correta."""
+    def password_entered():
+        if st.session_state["password"] == st.secrets.get("SENHA_ACESSO", ""):
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Limpa a senha da memória
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # Primeira execução, mostra o campo de senha
+        st.text_input("Digite a senha de acesso ao Dashboard:", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Senha errada, mostra o campo novamente com erro
+        st.text_input("Digite a senha de acesso ao Dashboard:", type="password", on_change=password_entered, key="password")
+        st.error("😕 Senha incorreta. Tente novamente.")
+        return False
+    else:
+        # Senha correta
+        return True
+
+if not check_password():
+    st.stop()  # Para a execução aqui se a senha estiver errada
+# --- FIM DO SISTEMA DE SENHA ---
+
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 # Atualiza a página a cada 5 minutos (300.000 milissegundos)
 st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
