@@ -402,5 +402,50 @@ if not df_final.empty and "tipologia" in df_final.columns:
 else:
     st.info("Ainda não há dados de tipologia de imóvel suficientes para a análise.")
 
+    # 12. MAPA DE DISPERSÃO DE ESPÉCIES (GÊNERO DA BROMÉLIA VS MOSQUITO)
+st.markdown("---")
+st.markdown("### 🌿 Relação entre Gênero da Bromélia e Espécies de Mosquitos")
+
+if not df_lab.empty and not df_final.empty and "genero" in df_final.columns:
+    # 1. Pega o gênero de cada planta
+    df_genero = df_final[["id_bromelia", "genero"]].drop_duplicates()
+    
+    # 2. Pega as amostras de cada planta
+    df_amostras_genero = pd.merge(df_amostras, df_genero, on="id_bromelia", how="left")
+    
+    # 3. Junta com o laboratório para saber quais espécies estavam em cada amostra
+    df_dispersao = pd.merge(df_amostras_genero, df_lab, on="codigo_amostra", how="inner")
+    
+    if not df_dispersao.empty:
+        # Agrupa por Gênero da Bromélia e Espécie do Mosquito, somando a quantidade
+        df_chart = df_dispersao.groupby(["genero", "especie"]).agg({
+            "qtd_especimes": "sum"
+        }).reset_index()
+        
+        # Limpa os nomes para exibição
+        df_chart["genero"] = df_chart["genero"].str.replace("_", " ").str.capitalize()
+        df_chart["especie"] = df_chart["especie"].str.replace("_", " ").str.capitalize()
+        
+        # Cria o gráfico de barras agrupadas
+        fig_disp = px.bar(
+            df_chart, 
+            x="genero", 
+            y="qtd_especimes", 
+            color="especie", 
+            barmode="group",
+            text="qtd_especimes",
+            labels={"genero": "Gênero da Bromélia", "qtd_especimes": "Espécimes", "especie": "Espécie de Mosquito"},
+            title="Distribuição de Espécies de Mosquitos por Gênero de Bromélia"
+        )
+        
+        fig_disp.update_layout(height=450, margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig_disp, use_container_width=True)
+        
+        st.info("Este gráfico mostra em qual tipo de bromélia cada espécie de mosquito foi encontrada. Barras mais altas indicam maior quantidade daquela espécie no gênero de bromélia correspondente.")
+    else:
+        st.info("Ainda não há dados suficientes para cruzar gênero de bromélia com espécies de mosquitos.")
+else:
+    st.info("Aguardando dados de gênero ou laboratório.")
+
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
