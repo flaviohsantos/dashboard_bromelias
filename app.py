@@ -10,6 +10,7 @@ import requests
 import streamlit as st
 from streamlit_folium import st_folium
 from folium.plugins import HeatMap
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
 # Atualiza a página a cada 5 minutos (300.000 milissegundos)
