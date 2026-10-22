@@ -194,20 +194,40 @@ for indice, item in enumerate(lista_campo):
                     amostras.append({"id_visita": id_visita, "id_bromelia": id_planta,
                                      "codigo_amostra": normalizar_codigo(cod), "data_visita": data_v})
 
-codigos_lab = set()   # amostras com formulário de laboratório preenchido (mesmo sem larvas)
-lab_especies = []
-for item in lista_lab:
+# Uma análise por amostra: se o mesmo código foi enviado mais de uma vez, vale o envio mais recente
+lab_por_codigo = {}
+codigos_lab_duplicados = set()
+for item in sorted(lista_lab, key=lambda i: i.get("_submission_time") or ""):
     cod_lab = item.get("grp_amostra/codigo_amostra")
     if not cod_lab or not str(cod_lab).strip():
         continue
     cod_lab = normalizar_codigo(cod_lab)
-    codigos_lab.add(cod_lab)
+    if cod_lab in lab_por_codigo:
+        codigos_lab_duplicados.add(cod_lab)
+    lab_por_codigo[cod_lab] = item
+
+codigos_lab = set(lab_por_codigo)   # amostras com formulário de laboratório preenchido (mesmo sem larvas)
+lab_especies = []
+resultados_lab = {}                 # código -> positivo / negativo / inconclusivo
+for cod_lab, item in lab_por_codigo.items():
+    res_linhas = []
     for e in item.get("rep_especies", []) or []:
         especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
-        qtd = numero_inteiro(e.get("rep_especies/qtd_larvas")) + numero_inteiro(e.get("rep_especies/qtd_pupas"))
+        # Mesma soma do formulário do laboratório: larvas + pupas + adultos
+        qtd = (numero_inteiro(e.get("rep_especies/qtd_larvas")) + numero_inteiro(e.get("rep_especies/qtd_pupas"))
+               + numero_inteiro(e.get("rep_especies/qtd_adultos")))
+        res = normalizar_texto(e.get("rep_especies/resultado_amostra"))
+        if res:
+            res_linhas.append(res)
         lab_especies.append({"codigo_amostra": cod_lab,
                              "especie": normalizar_texto(especie).replace(" ", "_"),
                              "qtd_especimes": qtd})
+    # Lê o resultado geral fora do grupo repetido (se for movido) ou, senão, das linhas de espécie
+    res_geral = normalizar_texto(item.get("grp_resultado/resultado_amostra"))
+    if not res_geral and res_linhas:
+        res_geral = ("inconclusivo" if "inconclusivo" in res_linhas
+                     else "positivo" if "positivo" in res_linhas else "negativo")
+    resultados_lab[cod_lab] = res_geral
 
 df_plantas = pd.DataFrame(plantas, columns=["id_bromelia", "bairro", "genero", "tipologia", "lat", "lon"]
                           ).drop_duplicates(subset=["id_bromelia"])
@@ -262,8 +282,12 @@ else:
     ).reset_index()
 
 df_am = df_amostras.merge(df_res_lab, on="codigo_amostra", how="left")
-df_am["analisada"] = df_am["codigo_amostra"].isin(codigos_lab)
 df_am["positiva"] = df_am["positiva"].eq(True)
+df_am["registrada_lab"] = df_am["codigo_amostra"].isin(codigos_lab)
+df_am["resultado_lab"] = df_am["codigo_amostra"].map(resultados_lab).fillna("")
+# Espécie-alvo encontrada = positiva, mesmo que o resultado geral esteja inconclusivo
+df_am["inconclusiva"] = df_am["registrada_lab"] & (df_am["resultado_lab"] == "inconclusivo") & ~df_am["positiva"]
+df_am["analisada"] = df_am["registrada_lab"] & ~df_am["inconclusiva"]
 df_am["qtd_total"] = pd.to_numeric(df_am["qtd_total"], errors="coerce").fillna(0)
 df_am["qtd_alvo"] = pd.to_numeric(df_am["qtd_alvo"], errors="coerce").fillna(0)
 
@@ -329,7 +353,8 @@ with col_kpis:
     c4.metric("Positividade", f"{positividade:.1f}%")
     c5.metric("Espécimes (Lab)", total_especimes)
     st.caption(f"Positividade = plantas com {criterio_nome} ÷ plantas com amostra analisada. "
-               f"Plantas sem análise: {n_plantas - n_analisadas}.")
+               f"Plantas sem análise: {n_plantas - n_analisadas}. "
+               f"Amostras inconclusivas (fora do cálculo): {int(df_am['inconclusiva'].sum())}.")
     por_criterio = plantas_positivas_por_criterio(df_lab, df_amostras)
     st.caption("Plantas positivas por espécie (período): " + " · ".join(f"{k}: {v}" for k, v in por_criterio.items()))
 
@@ -353,7 +378,7 @@ st.markdown("---")
 # 3. AMOSTRAS PENDENTES
 st.markdown("### ⏳ Amostras Pendentes de Análise (Coletadas mas não Processadas)")
 if not df_am.empty:
-    df_pend = df_am[~df_am["analisada"]].copy()
+    df_pend = df_am[~df_am["registrada_lab"]].copy()
     if not df_pend.empty:
         df_pend["Dias de Espera"] = (HOJE - df_pend["data_visita"]).dt.days.astype("Int64")
         df_exibicao = df_pend[["codigo_amostra", "id_bromelia", "data_visita", "Dias de Espera"]].copy()
@@ -385,6 +410,10 @@ if codigos_lab_orfaos:
             prox = difflib.get_close_matches(cod, codigos_campo, n=1, cutoff=0.6)
             st.write(f"**{cod}** → código parecido no campo: {prox[0] if prox else 'nenhum'}")
 
+if codigos_lab_duplicados:
+    st.warning(f"⚠️ {len(codigos_lab_duplicados)} código(s) com mais de um envio no laboratório "
+               f"(vale o mais recente): {', '.join(sorted(codigos_lab_duplicados))}")
+
 st.markdown("---")
 
 # 4. MAPAS E TERMÔMETRO
@@ -399,13 +428,22 @@ if not df_mapa.empty:
         col_mapa, col_termo = st.columns([3, 1])
         with col_mapa:
             m1 = folium.Map(location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap")
-            for _, row in df_mapa.iterrows():
-                if row["positivo"]:
-                    folium.Circle(location=[row["lat"], row["lon"]], radius=100, color=STATUS_CORES["Positivo"],
+            # Um marcador por coordenada: várias plantas no mesmo ponto não escondem uma positiva
+            for (lat_l, lon_l), grupo in df_mapa.groupby(["lat", "lon"]):
+                if (grupo["status"] == "Positivo").any():
+                    status_local = "Positivo"
+                elif (grupo["status"] == "Negativo").any():
+                    status_local = "Negativo"
+                else:
+                    status_local = "Sem análise"
+                if status_local == "Positivo":
+                    folium.Circle(location=[lat_l, lon_l], radius=100, color=STATUS_CORES["Positivo"],
                                   fill=True, fill_opacity=0.2, weight=2).add_to(m1)
-                folium.Marker(location=[row["lat"], row["lon"]],
-                              icon=folium.Icon(color=STATUS_ICONES[row["status"]], icon="info-sign"),
-                              popup=f"<b>{row['id_bromelia']}</b><br>{row['status'].upper()}").add_to(m1)
+                linhas = "<br>".join(f"{r['id_bromelia']}: {r['status']}" for _, r in grupo.iterrows())
+                folium.Marker(location=[lat_l, lon_l],
+                              icon=folium.Icon(color=STATUS_ICONES[status_local], icon="info-sign"),
+                              popup=folium.Popup(f"<b>{len(grupo)} planta(s)</b><br>{linhas}", max_width=320)
+                              ).add_to(m1)
             st_folium(m1, width=None, height=450, key="mapa1")
         with col_termo:
             st.markdown("#### 🌡️ Termômetro")
@@ -419,7 +457,7 @@ if not df_mapa.empty:
             st.plotly_chart(fig_termo, use_container_width=True)
 
     with tab2:
-        st.markdown(f"#### 🔥 Mapa de Calor ({criterio_nome}: larvas + pupas)")
+        st.markdown(f"#### 🔥 Mapa de Calor ({criterio_nome}: espécimes)")
         df_calor = df_mapa[df_mapa["positivo"]]
         if not df_calor.empty:
             fig_mapa_calor = px.density_mapbox(
@@ -520,7 +558,7 @@ with col_tab1:
         df_esp = df_lab.groupby("especie").agg(Total=("qtd_especimes", "sum")).reset_index()
         df_esp["especie"] = df_esp["especie"].str.replace("_", " ").str.capitalize()
         df_esp["%"] = (df_esp["Total"] / df_esp["Total"].sum() * 100).round(1).astype(str) + "%"
-        st.dataframe(df_esp.rename(columns={"especie": "Espécie", "Total": "Larvas+Pupas"}),
+        st.dataframe(df_esp.rename(columns={"especie": "Espécie", "Total": "Espécimes"}),
                      hide_index=True, use_container_width=True)
 with col_tab2:
     st.markdown("#### 📈 Estatística Descritiva (Variáveis Ambientais)")
