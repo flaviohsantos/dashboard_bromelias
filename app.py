@@ -156,7 +156,8 @@ if not lista_campo:
 plantas, visitas_list, amostras = [], [], []
 
 for indice, item in enumerate(lista_campo):
-    id_planta = item.get("grp_cadastro/id_bromelia_calc") or f"SEM-ID-{indice}"
+    # Lê o ID do local (formulário v5) ou o ID da planta (formulário antigo)
+    id_planta = item.get("grp_cadastro/id_local_calc") or item.get("grp_cadastro/id_bromelia_calc") or f"SEM-ID-{indice}"
     bairro = item.get("grp_cadastro/bairro") or "N/I"
     genero = item.get("grp_cadastro/genero") or "N/I"
     tipologia = item.get("grp_cadastro/tipologia_imovel") or "N/I"
