@@ -154,12 +154,63 @@ total_especimes = df_final["qtd_especimes"].sum()
 plantas_positivas = df_final[df_final["positivo"]]["id_bromelia"].nunique()
 positividade = (plantas_positivas / n_plantas * 100) if n_plantas > 0 else 0
 
-st.markdown("### 📊 Indicadores")
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Plantas", n_plantas)
-c2.metric("Espécimes (Lab)", int(total_especimes))
-c3.metric("Plantas Positivas", plantas_positivas)
-c4.metric("Positividade", f"{positividade:.1f}%")
+# 1. PAINEL EXECUTIVO
+st.markdown("### 📊 Painel Executivo")
+
+# Calcula a positividade e o bairro crítico para o alerta
+n_plantas = df_final["id_bromelia"].nunique()
+total_especimes = df_final["qtd_especimes"].sum()
+plantas_positivas = df_final[df_final["positivo"]]["id_bromelia"].nunique()
+positividade = (plantas_positivas / n_plantas * 100) if n_plantas > 0 else 0
+
+# Descobre o bairro com maior risco
+bairro_alerta = "Nenhum"
+if not df_final.empty:
+    df_risco = df_final.groupby("bairro").agg(
+        total=("id_bromelia", "count"),
+        positivas=("positivo", "sum")
+    ).reset_index()
+    df_risco["% risco"] = (df_risco["positivas"] / df_risco["total"] * 100)
+    if not df_risco.empty and df_risco["% risco"].max() > 0:
+        top_bairro = df_risco.sort_values(by="% risco", ascending=False).iloc[0]
+        bairro_alerta = f"{top_bairro['bairro'].capitalize()} ({top_bairro['% risco']:.0f}%)"
+
+# Cria o layout de 2 colunas: KPIs na esquerda, Alerta na direita
+col_kpis, col_alerta = st.columns([2, 1])
+
+with col_kpis:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Plantas", n_plantas)
+    c2.metric("Espécimes (Lab)", int(total_especimes))
+    c3.metric("Plantas Positivas", plantas_positivas)
+    c4.metric("Positividade Geral", f"{positividade:.1f}%")
+
+with col_alerta:
+    # Cartão de Alerta (Muda de cor dependendo da positividade)
+    if positividade < 15:
+        cor_bg = "#D6EAF8"
+        cor_texto = "#2E86AB"
+        icone = "✅"
+        msg = "Risco Baixo. Nenhuma ação emergencial necessária."
+    elif positividade < 40:
+        cor_bg = "#FDEBD0"
+        cor_texto = "#F4A261"
+        icone = "⚠️"
+        msg = f"Risco Médio. Atenção ao bairro {bairro_alerta}."
+    else:
+        cor_bg = "#FADBD8"
+        cor_texto = "#E63946"
+        icone = "🚨"
+        msg = f"Risco Alto. Ação urgente no bairro {bairro_alerta}."
+        
+    st.markdown(f"""
+    <div style="background-color: {cor_bg}; padding: 15px; border-radius: 10px; border-left: 5px solid {cor_texto}; height: 100%;">
+        <h4 style="color: {cor_texto}; margin-top: 0;">{icone} Status: {'ALTO' if positividade >= 40 else 'MÉDIO' if positividade >= 15 else 'BAIXO'}</h4>
+        <p style="color: #333; margin-bottom: 0; font-size: 14px;">{msg}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown("---")
 
 # 2. MÉDIAS DA ÁGUA
 st.markdown("---")
