@@ -426,5 +426,86 @@ if not df_visitas.empty:
     if stats:
         st.dataframe(pd.DataFrame(stats), hide_index=True, use_container_width=True)
 
+        # 10. CORRELAÇÃO ECOLÓGICA (AMBIENTE VS LARVAS)
+st.markdown("---")
+st.markdown("### 🔬 Correlação Ecológica: Água vs. Presença de Larvas")
+
+if not df_visitas.empty and not df_final.empty:
+    # 1. Prepara os dados de visitas (convertendo para numérico)
+    df_eco = df_visitas.copy()
+    df_eco["ph"] = pd.to_numeric(df_eco["ph"], errors="coerce")
+    df_eco["temp"] = pd.to_numeric(df_eco["temp"], errors="coerce")
+    df_eco["vol"] = pd.to_numeric(df_eco["vol"], errors="coerce")
+    
+    # 2. Junta com a positividade (que veio do laboratório)
+    df_eco = pd.merge(df_eco, df_final[["id_bromelia", "positivo"]], on="id_bromelia", how="left")
+    df_eco["Status"] = df_eco["positivo"].apply(lambda x: "Com Aedes" if x else "Sem Aedes")
+    
+    # Remove linhas sem dados de água (ex: plantas secas)
+    df_eco_valido = df_eco.dropna(subset=["ph", "temp", "vol"], how="all")
+    
+    if not df_eco_valido.empty:
+        col_eco1, col_eco2, col_eco3 = st.columns(3)
+        
+        # --- GRÁFICO 1: pH vs Status ---
+        with col_eco1:
+            st.markdown("#### 🧪 pH da Água")
+            if not df_eco_valido["ph"].dropna().empty:
+                fig_ph = px.box(
+                    df_eco_valido.dropna(subset=["ph"]), 
+                    x="Status", 
+                    y="ph", 
+                    color="Status",
+                    points="all",
+                    color_discrete_map={"Com Aedes": "#E63946", "Sem Aedes": "#2E86AB"},
+                    labels={"ph": "pH", "Status": ""}
+                )
+                fig_ph.update_layout(showlegend=False, height=350, margin=dict(l=10, r=10, t=30, b=10))
+                st.plotly_chart(fig_ph, use_container_width=True)
+            else:
+                st.info("Sem dados de pH.")
+
+        # --- GRÁFICO 2: Temperatura vs Status ---
+        with col_eco2:
+            st.markdown("#### 🌡️ Temperatura (°C)")
+            if not df_eco_valido["temp"].dropna().empty:
+                fig_temp = px.box(
+                    df_eco_valido.dropna(subset=["temp"]), 
+                    x="Status", 
+                    y="temp", 
+                    color="Status",
+                    points="all",
+                    color_discrete_map={"Com Aedes": "#E63946", "Sem Aedes": "#2E86AB"},
+                    labels={"temp": "Temperatura (°C)", "Status": ""}
+                )
+                fig_temp.update_layout(showlegend=False, height=350, margin=dict(l=10, r=10, t=30, b=10))
+                st.plotly_chart(fig_temp, use_container_width=True)
+            else:
+                st.info("Sem dados de temperatura.")
+
+        # --- GRÁFICO 3: Volume vs Status ---
+        with col_eco3:
+            st.markdown("#### 💧 Volume (mL)")
+            if not df_eco_valido["vol"].dropna().empty:
+                fig_vol = px.box(
+                    df_eco_valido.dropna(subset=["vol"]), 
+                    x="Status", 
+                    y="vol", 
+                    color="Status",
+                    points="all",
+                    color_discrete_map={"Com Aedes": "#E63946", "Sem Aedes": "#2E86AB"},
+                    labels={"vol": "Volume (mL)", "Status": ""}
+                )
+                fig_vol.update_layout(showlegend=False, height=350, margin=dict(l=10, r=10, t=30, b=10))
+                st.plotly_chart(fig_vol, use_container_width=True)
+            else:
+                st.info("Sem dados de volume.")
+                
+        st.info("💡 **Como interpretar:** A caixa vermelha mostra a faixa de valores onde as plantas **com Aedes** se encontram. Se a caixa vermelha estiver em uma faixa diferente da azul, isso indica que o mosquito tem uma preferência por aquela condição ambiental.")
+    else:
+        st.info("Ainda não há dados de água suficientes para gerar a correlação.")
+else:
+    st.info("Aguardando dados de visitas.")
+
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
