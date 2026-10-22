@@ -111,21 +111,25 @@ for indice, item in enumerate(lista_campo):
                     if cod:
                         amostras.append({"id_bromelia": id_planta, "codigo_amostra": str(cod).strip()})
 
+# --- PROCESSAMENTO DO LABORATÓRIO (O PULO DO GATO) ---
 lab_especies = []
 for item in lista_lab:
     cod_lab = item.get("grp_amostra/codigo_amostra")
     if not cod_lab: continue
     
-    for e in item.get("rep_especies", []):
-        especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
-        qtd_l = numero_inteiro(e.get("rep_especies/qtd_larvas"))
-        qtd_p = numero_inteiro(e.get("rep_especies/qtd_pupas"))
-        
-        lab_especies.append({
-            "codigo_amostra": str(cod_lab).strip(),
-            "especie": normalizar_texto(especie).replace(" ", "_"),
-            "qtd_especimes": qtd_l + qtd_p
-        })
+    # AQUI está a mágica: ele itera sobre a lista de espécies que o Kobo envia
+    especies_amostra = item.get("rep_especies", [])
+    if isinstance(especies_amostra, list):
+        for e in especies_amostra:
+            especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
+            qtd_l = numero_inteiro(e.get("rep_especies/qtd_larvas"))
+            qtd_p = numero_inteiro(e.get("rep_especies/qtd_pupas"))
+            
+            lab_especies.append({
+                "codigo_amostra": str(cod_lab).strip(),
+                "especie": normalizar_texto(especie).replace(" ", "_"),
+                "qtd_especimes": qtd_l + qtd_p
+            })
 
 df_plantas = pd.DataFrame(plantas).drop_duplicates(subset=["id_bromelia"])
 df_visitas = pd.DataFrame(visitas_list)
@@ -198,7 +202,7 @@ if not df_visitas.empty:
 
 st.markdown("---")
 
-# 3. MAPAS E TERMÔMETRO (4 ABAS)
+# 3. MAPAS E TERMÔMETRO
 st.markdown("### 🗺️ Mapas de Risco e Termômetro")
 df_mapa = df_final.dropna(subset=["lat", "lon"])
 if not df_mapa.empty:
@@ -293,12 +297,10 @@ if not df_final.empty and "tipologia" in df_final.columns:
         fig_tipo.add_annotation(x=row["tipologia"], y=row["Total_Plantas"] + 0.5, text=f"{row['% Positividade']}%", showarrow=False, font=dict(color="#E63946", size=14))
     fig_tipo.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig_tipo, use_container_width=True)
-else:
-    st.info("Ainda não há dados de tipologia de imóvel suficientes para a análise.")
 
-# 7. TABELAS DE TOTAIS E PERCENTUAIS
+# 7. TABELAS FINAIS
 st.markdown("---")
-st.markdown("### 📊 Tabelas de Totais e Percentuais")
+st.markdown("### 📊 Tabelas de Totais e Estatísticas")
 col_tab1, col_tab2 = st.columns(2)
 
 with col_tab1:
@@ -311,22 +313,20 @@ with col_tab1:
         st.dataframe(df_esp.rename(columns={"especie": "Espécie", "Total": "Larvas+Pupas"}), hide_index=True, use_container_width=True)
 
 with col_tab2:
-    st.markdown("#### 🏘️ Totais por Bairro")
-    if not df_plantas.empty:
-        df_bairro = df_plantas.groupby("bairro").agg(Plantas=("id_bromelia", "count")).reset_index()
-        ids_positivos = df_final[df_final["positivo"]]["id_bromelia"].unique()
-        df_plantas_positivas = df_plantas[df_plantas["id_bromelia"].isin(ids_positivos)]
-        contagem_positivas = df_plantas_positivas.groupby("bairro").agg(Positivas=("id_bromelia", "count")).reset_index()
-        df_bairro = pd.merge(df_bairro, contagem_positivas, on="bairro", how="left")
-        df_bairro["Positivas"] = df_bairro["Positivas"].fillna(0).astype(int)
-        df_bairro["% Positividade"] = (df_bairro["Positivas"] / df_bairro["Plantas"] * 100).round(1).astype(str) + "%"
-        st.dataframe(df_bairro.rename(columns={"bairro": "Bairro", "Plantas": "Total de Plantas"}), hide_index=True, use_container_width=True)
+    st.markdown("#### 📈 Estatísticas da Água")
+    if not df_visitas.empty:
+        vars = {"pH": df_visitas["ph"], "Temp": df_visitas["temp"], "Volume": df_visitas["vol"]}
+        stats = []
+        for nome, serie in vars.items():
+            dados = serie.dropna()
+            if not dados.empty:
+                stats.append({"Variável": nome, "N": len(dados), "Média": round(dados.mean(), 2), "Mediana": round(dados.median(), 2), "Desvio Padrão": round(dados.std(), 2)})
+        st.dataframe(pd.DataFrame(stats), hide_index=True, use_container_width=True)
 
-# 8. ANÁLISE DE SAZONALIDADE E RANKING
+# 8. SAZONALIDADE E RANKING
 st.markdown("---")
 st.markdown("### 📈 Análise de Sazonalidade e Ranking de Bairros")
 col_saz, col_rank = st.columns([2, 1])
-
 with col_saz:
     st.markdown("#### Positividade de Aedes por Mês")
     if not df_visitas.empty and not df_final.empty:
@@ -334,20 +334,16 @@ with col_saz:
         df_saz["data_visita"] = pd.to_datetime(df_saz["data_visita"], errors="coerce")
         df_saz["mes"] = df_saz["data_visita"].dt.to_period("M").astype(str)
         df_saz = pd.merge(df_saz, df_final[["id_bromelia", "positivo"]], on="id_bromelia", how="left")
-        df_saz_agrupado = df_saz.groupby("mes").agg(Total=("id_bromelia", "nunique"), Positivas=("positivo", "sum")).reset_index()
-        df_saz_agrupado["%"] = (df_saz_agrupado["Positivas"] / df_saz_agrupado["Total"] * 100).round(1)
-        st.plotly_chart(px.line(df_saz_agrupado, x="mes", y="%", markers=True, title="Variação da Positividade ao Longo do Tempo"), use_container_width=True)
+        df_saz = df_saz.groupby("mes").agg(Total=("id_bromelia", "nunique"), Positivas=("positivo", "sum")).reset_index()
+        df_saz["%"] = (df_saz["Positivas"] / df_saz["Total"] * 100).round(1)
+        st.plotly_chart(px.line(df_saz, x="mes", y="%", markers=True, title="Variação da Positividade ao Longo do Tempo"), use_container_width=True)
 
 with col_rank:
     st.markdown("#### 🏘️ Ranking de Bairros (Maior Risco)")
-    if not df_plantas.empty and not df_final.empty:
-        df_rank = df_plantas.copy()
-        df_rank = pd.merge(df_rank, df_final[["id_bromelia", "positivo"]], on="id_bromelia", how="left")
-        df_rank["positivo"] = df_rank["positivo"].fillna(False)
-        df_rank_agrupado = df_rank.groupby("bairro").agg(Total=("id_bromelia", "count"), Positivas=("positivo", "sum")).reset_index()
-        df_rank_agrupado["%"] = (df_rank_agrupado["Positivas"] / df_rank_agrupado["Total"] * 100).round(1)
-        df_rank_agrupado = df_rank_agrupado.sort_values(by="%", ascending=False)
-        st.dataframe(df_rank_agrupado.rename(columns={"bairro": "Bairro", "Total": "Plantas", "Positivas": "Positivas", "%": "% Risco"}), hide_index=True, use_container_width=True)
+    if not df_final.empty:
+        df_rank = df_final.groupby("bairro").agg(Total=("id_bromelia", "count"), Positivas=("positivo", "sum")).reset_index()
+        df_rank["%"] = (df_rank["Positivas"] / df_rank["Total"] * 100).round(1)
+        st.dataframe(df_rank.sort_values(by="%", ascending=False).rename(columns={"bairro": "Bairro", "Total": "Plantas", "Positivas": "Positivas", "%": "% Risco"}), hide_index=True, use_container_width=True)
 
 # 9. ESTATÍSTICA DESCRITIVA
 st.markdown("---")
@@ -385,76 +381,23 @@ if not df_visitas.empty and not df_final.empty:
     with c3:
         st.markdown("#### 💧 Volume")
         st.plotly_chart(px.box(df_eco.dropna(subset=["vol"]), x="Status", y="vol", color="Status", color_discrete_map={"Com Aedes": "#E63946", "Sem Aedes": "#2E86AB"}), use_container_width=True)
-    st.info("A caixa vermelha mostra a faixa de valores onde as plantas com Aedes se encontram. Se estiver em faixa diferente da azul, o mosquito tem preferência por aquela condição.")
 
-# 11. ANÁLISE POR TIPOLOGIA DE IMÓVEL
-st.markdown("---")
-st.markdown("### 🏠 Análise por Tipologia de Imóvel")
-if not df_final.empty and "tipologia" in df_final.columns:
-    df_tipo_agrupado = df_final.groupby("tipologia").agg(Total_Plantas=("id_bromelia", "count"), Positivas=("positivo", "sum")).reset_index()
-    df_tipo_agrupado["% Positividade"] = (df_tipo_agrupado["Positivas"] / df_tipo_agrupado["Total_Plantas"] * 100).round(1)
-    df_plot = pd.melt(df_tipo_agrupado, id_vars=["tipologia"], value_vars=["Positivas", "Total_Plantas"], var_name="Status", value_name="Quantidade")
-    fig_tipo = px.bar(df_plot, x="tipologia", y="Quantidade", color="Status", barmode="group", text="Quantidade", color_discrete_map={"Positivas": "#E63946", "Total_Plantas": "#2E86AB"})
-    for i, row in df_tipo_agrupado.iterrows():
-        fig_tipo.add_annotation(x=row["tipologia"], y=row["Total_Plantas"] + 0.5, text=f"{row['% Positividade']}%", showarrow=False, font=dict(color="#E63946", size=14))
-    fig_tipo.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
-    st.plotly_chart(fig_tipo, use_container_width=True)
-else:
-    st.info("Ainda não há dados de tipologia de imóvel suficientes para a análise.")
-
-    # 12. MAPA DE DISPERSÃO DE ESPÉCIES (GÊNERO DA BROMÉLIA VS MOSQUITO)
+# 11. DISPERSÃO DE ESPÉCIES
 st.markdown("---")
 st.markdown("### 🌿 Relação entre Gênero da Bromélia e Espécies de Mosquitos")
-
 if not df_lab.empty and not df_final.empty and "genero" in df_final.columns:
-    # 1. Pega o gênero de cada planta
     df_genero = df_final[["id_bromelia", "genero"]].drop_duplicates()
-    
-    # 2. Pega as amostras de cada planta
     df_amostras_genero = pd.merge(df_amostras, df_genero, on="id_bromelia", how="left")
-    
-    # 3. Junta com o laboratório para saber quais espécies estavam em cada amostra
     df_dispersao = pd.merge(df_amostras_genero, df_lab, on="codigo_amostra", how="inner")
     
     if not df_dispersao.empty:
-        # Agrupa por Gênero da Bromélia e Espécie do Mosquito, somando a quantidade
-        df_chart = df_dispersao.groupby(["genero", "especie"]).agg({
-            "qtd_especimes": "sum"
-        }).reset_index()
-        
-        # Limpa os nomes para exibição
+        df_chart = df_dispersao.groupby(["genero", "especie"]).agg({"qtd_especimes": "sum"}).reset_index()
         df_chart["genero"] = df_chart["genero"].str.replace("_", " ").str.capitalize()
         df_chart["especie"] = df_chart["especie"].str.replace("_", " ").str.capitalize()
         
-        # Cria o gráfico de barras agrupadas
-        fig_disp = px.bar(
-            df_chart, 
-            x="genero", 
-            y="qtd_especimes", 
-            color="especie", 
-            barmode="group",
-            text="qtd_especimes",
-            labels={"genero": "Gênero da Bromélia", "qtd_especimes": "Espécimes", "especie": "Espécie de Mosquito"},
-            title="Distribuição de Espécies de Mosquitos por Gênero de Bromélia"
-        )
-        
+        fig_disp = px.bar(df_chart, x="genero", y="qtd_especimes", color="especie", barmode="group", text="qtd_especimes", labels={"genero": "Gênero da Bromélia", "qtd_especimes": "Espécimes", "especie": "Espécie de Mosquito"})
         fig_disp.update_layout(height=450, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig_disp, use_container_width=True)
-        
-        st.info("Este gráfico mostra em qual tipo de bromélia cada espécie de mosquito foi encontrada. Barras mais altas indicam maior quantidade daquela espécie no gênero de bromélia correspondente.")
-    else:
-        st.info("Ainda não há dados suficientes para cruzar gênero de bromélia com espécies de mosquitos.")
-else:
-    st.info("Aguardando dados de gênero ou laboratório.")
 
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
-
-st.markdown("---")
-st.markdown("### 🛠️ MODO DE TESTE (Diagnóstico do Loop)")
-if st.checkbox("Mostrar dados brutos do último teste"):
-    if lista_lab:
-        st.write("**Registros de laboratório recebidos:**")
-        st.json(lista_lab[0]) # Mostra o primeiro registro do lab
-    else:
-        st.warning("Nenhum dado de laboratório.")
