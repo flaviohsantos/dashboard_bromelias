@@ -449,3 +449,12 @@ else:
 
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
+
+st.markdown("---")
+st.markdown("### 🛠️ MODO DE TESTE (Diagnóstico do Loop)")
+if st.checkbox("Mostrar dados brutos do último teste"):
+    if lista_lab:
+        st.write("**Registros de laboratório recebidos:**")
+        st.json(lista_lab[0]) # Mostra o primeiro registro do lab
+    else:
+        st.warning("Nenhum dado de laboratório.")
