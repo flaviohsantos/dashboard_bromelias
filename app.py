@@ -233,15 +233,50 @@ if not df_mapa.empty:
             fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(fig_termo, use_container_width=True)
             
+       # --- ABA 2: MAPA DE CALOR ---
     with tab2:
-        st.markdown("#### 🔥 Mapa de Calor")
+        st.markdown("#### 🔥 Mapa de Calor (Intensidade de Focos)")
+        
+        # Filtra apenas as plantas positivas
         df_calor = df_mapa[df_mapa["positivo"]]
+        
         if not df_calor.empty:
-            fig_mapa_calor = px.density_mapbox(df_calor, lat="lat", lon="lon", z="qtd_especimes", radius=40, center=dict(lat=centro_lat, lon=centro_lon), zoom=14, mapbox_style="open-street-map", color_continuous_scale="Inferno")
-            fig_mapa_calor.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False)
+            # Cria o mapa usando o Plotly (não trava a rolagem)
+            # Aumentei o radius para a mancha ficar maior e mais visível
+            fig_mapa_calor = px.density_mapbox(
+                df_calor, 
+                lat="lat", 
+                lon="lon", 
+                z="qtd_especimes", 
+                radius=60, # Aumentado de 40 para 60
+                center=dict(lat=centro_lat, lon=centro_lon),
+                zoom=13, # Zoom um pouco mais aberto
+                mapbox_style="open-street-map",
+                color_continuous_scale="Inferno" 
+            )
+            
+            # Adiciona os pinos vermelhos por cima do calor
+            for _, row in df_calor.iterrows():
+                fig_mapa_calor.add_scattermapbox(
+                    lat=[row["lat"]],
+                    lon=[row["lon"]],
+                    mode="markers",
+                    marker=dict(size=12, color="#E63946"),
+                    name="Aedes",
+                    showlegend=False,
+                    hovertext=f"Planta: {row['id_bromelia']}",
+                    hoverinfo="text"
+                )
+
+            fig_mapa_calor.update_layout(
+                margin=dict(l=0, r=0, t=0, b=0), 
+                height=450,
+                coloraxis_showscale=False 
+            )
             st.plotly_chart(fig_mapa_calor, use_container_width=True)
+            st.info("As manchas indicam a concentração de focos. Os pinos vermelhos mostram a localização exata de cada planta positiva.")
         else:
-            st.info("✅ Nenhuma planta positiva para gerar o mapa de calor.")
+            st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
             
     with tab3:
         df_agrupado = df_mapa.groupby(["lat", "lon", "positivo"]).size().reset_index(name="quantidade")
