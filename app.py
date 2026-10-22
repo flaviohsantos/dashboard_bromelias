@@ -12,6 +12,8 @@ from streamlit_folium import st_folium
 from folium.plugins import HeatMap
 
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
+# Atualiza a página a cada 5 minutos (300.000 milissegundos)
+st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.caption(f"Pesquisador: Flávio Santos (IOC - Fiocruz) | Atualizado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 st.markdown("---")
