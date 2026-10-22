@@ -578,5 +578,66 @@ if not df_visitas.empty and not df_final.empty:
 else:
     st.info("Aguardando dados de visitas.")
 
+    # 11. ANÁLISE POR TIPOLOGIA DE IMÓVEL
+st.markdown("---")
+st.markdown("### 🏠 Análise por Tipologia de Imóvel")
+
+if not df_plantas.empty and "tipologia_imovel" in df_campo.columns:
+    # Junta os dados de tipologia com o resultado do laboratório
+    df_tipo = pd.DataFrame({
+        "id_bromelia": df_campo["id_bromelia_calc"],
+        "tipologia": df_campo["tipologia_imovel"]
+    }).drop_duplicates(subset=["id_bromelia"])
+    
+    # Adiciona a positividade
+    df_tipo = pd.merge(df_tipo, df_final[["id_bromelia", "positivo"]], on="id_bromelia", how="left")
+    df_tipo["positivo"] = df_tipo["positivo"].fillna(False)
+    
+    # Agrupa por tipologia
+    df_tipo_agrupado = df_tipo.groupby("tipologia").agg(
+        Total_Plantas=("id_bromelia", "count"),
+        Positivas=("positivo", "sum")
+    ).reset_index()
+    
+    # Calcula a porcentagem
+    df_tipo_agrupado["% Positividade"] = (df_tipo_agrupado["Positivas"] / df_tipo_agrupado["Total_Plantas"] * 100).round(1)
+    
+    # Cria o gráfico de barras agrupadas
+    df_plot = pd.melt(
+        df_tipo_agrupado, 
+        id_vars=["tipologia"], 
+        value_vars=["Positivas", "Total_Plantas"],
+        var_name="Status", 
+        value_name="Quantidade"
+    )
+    
+    fig_tipo = px.bar(
+        df_plot, 
+        x="tipologia", 
+        y="Quantidade", 
+        color="Status", 
+        barmode="group",
+        text="Quantidade",
+        color_discrete_map={"Positivas": "#E63946", "Total_Plantas": "#2E86AB"},
+        labels={"tipologia": "Tipo de Imóvel", "Quantidade": "Plantas", "Status": "Status"}
+    )
+    
+    # Adiciona uma linha com a % de positividade no gráfico
+    for i, row in df_tipo_agrupado.iterrows():
+        fig_tipo.add_annotation(
+            x=row["tipologia"],
+            y=row["Total_Plantas"] + 0.5,
+            text=f"{row['% Positividade']}%",
+            showarrow=False,
+            font=dict(color="#E63946", size=14)
+        )
+
+    fig_tipo.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
+    st.plotly_chart(fig_tipo, use_container_width=True)
+    
+    st.info("A barra azul mostra o total de plantas cadastradas. A barra vermelha mostra quantas delas deram positivo para Aedes. A porcentagem acima indica a taxa de positividade daquele tipo de imóvel.")
+else:
+    st.info("Ainda não há dados de tipologia de imóvel suficientes para a análise.")
+
 st.markdown("---")
 st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
