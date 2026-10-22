@@ -399,16 +399,18 @@ if not df_lab.empty and not df_final.empty and "genero" in df_final.columns:
         fig_disp.update_layout(height=450, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig_disp, use_container_width=True)
 
-        # 13. AMOSTRAS PENDENTES DE ANÁLISE
+# 13. AMOSTRAS PENDENTES DE ANÁLISE
 st.markdown("---")
 st.markdown("### ⏳ Amostras Pendentes de Análise (Coletadas mas não Processadas)")
 
+# ⚠️ SUBSTITUA ESTE LINK PELO LINK DO SEU FORMULÁRIO DE LABORATÓRIO NO KOBO
+URL_FORMULARIO_LAB = "https://ee.kobotoolbox.org/AtOwQDsP"
+
 if not df_amostras.empty:
-    # 1. Junta as amostras com as datas de visita (para saber quando foi coletado)
+    # 1. Junta as amostras com as datas de visita
     df_pendentes = pd.merge(df_amostras, df_visitas[["id_bromelia", "data_visita"]], on="id_bromelia", how="left")
     
-    # 2. Cria uma coluna booleana que diz se a amostra já tem resultado no lab
-    # Se o código não estiver no df_lab, a amostra está pendente
+    # 2. Verifica quais amostras já têm resultado no lab
     codigos_com_resultado = df_lab["codigo_amostra"].unique() if not df_lab.empty else []
     df_pendentes["Analisada"] = df_pendentes["codigo_amostra"].isin(codigos_com_resultado)
     
@@ -416,38 +418,52 @@ if not df_amostras.empty:
     df_apenas_pendentes = df_pendentes[~df_pendentes["Analisada"]].copy()
     
     if not df_apenas_pendentes.empty:
-        # Calcula há quantos dias a amostra foi coletada
+        # Calcula os dias de espera
         df_apenas_pendentes["data_visita"] = pd.to_datetime(df_apenas_pendentes["data_visita"], errors="coerce")
         df_apenas_pendentes["Dias de Espera"] = (datetime.now() - df_apenas_pendentes["data_visita"]).dt.days
         
-        # Remove duplicatas (caso a amostra apareça em mais de uma visita)
+        # Remove duplicatas
         df_apenas_pendentes = df_apenas_pendentes.drop_duplicates(subset=["codigo_amostra"])
         
-        # Prepara a tabela para exibição
+        # Prepara a tabela
         df_exibicao = df_apenas_pendentes[["codigo_amostra", "id_bromelia", "data_visita", "Dias de Espera"]].copy()
         df_exibicao["data_visita"] = df_exibicao["data_visita"].dt.strftime('%d/%m/%Y')
+        
+        # Cria a coluna com o link do formulário
+        df_exibicao["Ação"] = URL_FORMULARIO_LAB
         
         # Renomeia as colunas
         df_exibicao = df_exibicao.rename(columns={
             "codigo_amostra": "Código da Amostra",
             "id_bromelia": "Planta",
             "data_visita": "Data da Coleta",
-            "Dias de Espera": "Dias de Espera"
+            "Dias de Espera": "Dias de Espera",
+            "Ação": "Ação"
         })
         
-        # Ordena pelas amostras mais antigas (mais urgentes)
+        # Ordena pelos mais antigos
         df_exibicao = df_exibicao.sort_values(by="Dias de Espera", ascending=False)
         
-        # Exibe a tabela
-        st.dataframe(df_exibicao, hide_index=True, use_container_width=True)
+        # Mostra a tabela com o link clicável
+        st.dataframe(
+            df_exibicao[["Código da Amostra", "Planta", "Data da Coleta", "Dias de Espera", "Ação"]],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Ação": st.column_config.LinkColumn(
+                    "Ação",
+                    display_text="🔬 Analisar"
+                )
+            }
+        )
         
-        # Exibe um alerta se houver amostras muito antigas (mais de 30 dias)
+        # Alerta de atraso
         if df_exibicao["Dias de Espera"].max() > 30:
             st.warning(f"⚠️ Existem amostras com mais de 30 dias de espera! A mais antiga está aguardando há {df_exibicao['Dias de Espera'].max()} dias.")
         else:
             st.info("✅ Todas as amostras pendentes foram coletadas há menos de 30 dias.")
             
-        # Botão para baixar a lista de pendências
+        # Botão de download
         csv_pendentes = df_exibicao.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Baixar Lista de Pendências (CSV)",
