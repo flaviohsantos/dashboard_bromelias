@@ -266,15 +266,35 @@ if not df_mapa.empty:
             fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(fig_termo, use_container_width=True)
             
+       # --- ABA 2: MAPA DE CALOR ---
     with tab2:
-        m2 = folium.Map(location=[centro_lat, centro_lon], zoom_start=15, tiles="OpenStreetMap")
+        st.markdown("#### 🔥 Mapa de Calor (Intensidade de Focos)")
+        
+        # Filtra apenas as plantas positivas
         df_calor = df_mapa[df_mapa["positivo"]]
+        
         if not df_calor.empty:
-            heat_data = [[r["lat"], r["lon"]] for _, r in df_calor.iterrows()]
-            HeatMap(heat_data, radius=40, blur=25, min_opacity=0.8).add_to(m2)
-            st_folium(m2, width=None, height=450, key="mapa2")
+            # Usa o Plotly para desenhar o mapa de calor (não trava a rolagem)
+            fig_mapa_calor = px.density_mapbox(
+                df_calor, 
+                lat="lat", 
+                lon="lon", 
+                z="qtd_especimes", # A intensidade do calor é baseada na qtd de larvas
+                radius=40,
+                center=dict(lat=centro_lat, lon=centro_lon),
+                zoom=14,
+                mapbox_style="open-street-map", # Fundo claro e gratuito
+                color_continuous_scale="Inferno" # Escala de cores (Roxo ao Amarelo)
+            )
+            fig_mapa_calor.update_layout(
+                margin=dict(l=0, r=0, t=0, b=0), 
+                height=450,
+                coloraxis_showscale=False # Esconde a barra de cores lateral
+            )
+            st.plotly_chart(fig_mapa_calor, use_container_width=True)
+            st.info("O mapa de calor é mais intenso onde há maior concentração de espécimes positivos.")
         else:
-            st.info("Nenhuma planta positiva para gerar o mapa de calor.")
+            st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
             
     with tab3:
         df_agrupado = df_mapa.groupby(["lat", "lon", "positivo"]).size().reset_index(name="quantidade")
@@ -288,7 +308,7 @@ if not df_mapa.empty:
             fig_cluster.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, legend_title_text="Status")
             st.plotly_chart(fig_cluster, use_container_width=True)
             
-        # --- ABA 4: RISCO POR BAIRRO ---
+        
         # --- ABA 4: RISCO POR BAIRRO (MAPA) ---
     with tab4:
         st.markdown("#### 🏘️ Risco por Bairro (Positividade)")
