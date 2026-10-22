@@ -71,7 +71,7 @@ def numero_inteiro(valor):
     try: return max(0, int(float(str(valor).strip().replace(",", "."))))
     except: return 0
 
-# --- CARREGAMENTO DA API ---
+# --- CARREGAMENTO ---
 base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
 token = _get_secret("KOBO_TOKEN")
 uid_campo = _get_secret("UID_CAMPO")
@@ -85,7 +85,7 @@ if not lista_campo:
     st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# --- PROCESSAMENTO (BRUTO) ---
+# --- PROCESSAMENTO ---
 plantas = []
 visitas_list = []
 amostras = []
@@ -139,14 +139,13 @@ df_visitas = pd.DataFrame(visitas_list)
 df_amostras = pd.DataFrame(amostras).drop_duplicates(subset=["codigo_amostra"])
 df_lab = pd.DataFrame(lab_especies)
 
-# --- FILTRO DE DATA (NA BARRA LATERAL) ---
+# --- FILTRO DE DATA ---
 st.sidebar.markdown("---")
 st.sidebar.header("🔎 Filtro de Data")
 
 if not df_visitas.empty:
     df_visitas["data_visita"] = pd.to_datetime(df_visitas["data_visita"], errors="coerce")
     datas_validas = df_visitas["data_visita"].dropna()
-    
     if not datas_validas.empty:
         data_min = datas_validas.min().date()
         data_max = datas_validas.max().date()
@@ -156,24 +155,17 @@ if not df_visitas.empty:
 else:
     periodo_sel = None
 
-# --- APLICANDO O FILTRO AOS DADOS ---
 if periodo_sel and len(periodo_sel) == 2:
     data_ini, data_fim = periodo_sel
-    
-    # 1. Filtra as visitas
     df_visitas = df_visitas[(df_visitas["data_visita"].dt.date >= data_ini) & (df_visitas["data_visita"].dt.date <= data_fim)]
-    
-    # 2. Pega os IDs das plantas que tiveram visita no período
     ids_plantas_validas = df_visitas["id_bromelia"].unique()
     df_plantas = df_plantas[df_plantas["id_bromelia"].isin(ids_plantas_validas)]
-    
-    # 3. Filtra amostras e laboratório
     df_amostras = df_amostras[df_amostras["id_bromelia"].isin(ids_plantas_validas)]
     if not df_lab.empty and not df_amostras.empty:
         codigos_validos = df_amostras["codigo_amostra"].unique()
         df_lab = df_lab[df_lab["codigo_amostra"].isin(codigos_validos)]
 
-# --- CRUZAMENTO FINAL (COM OS DADOS FILTRADOS) ---
+# --- CRUZAMENTO FINAL ---
 if not df_amostras.empty and not df_lab.empty:
     df_merge = pd.merge(df_amostras, df_lab, on="codigo_amostra", how="left")
     df_por_planta = df_merge.groupby("id_bromelia").agg({"especie": lambda x: list(x.dropna().unique()), "qtd_especimes": "sum"}).reset_index()
@@ -186,10 +178,6 @@ else:
 df_final["positivo"] = df_final["especie"].apply(lambda x: any("aedes" in str(e) for e in x) if isinstance(x, list) else False)
 df_final["especie_str"] = df_final["especie"].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else "Não informado").str.replace("_", " ").str.capitalize()
 df_final["qtd_especimes"] = pd.to_numeric(df_final["qtd_especimes"], errors="coerce").fillna(0)
-
-# ==========================================
-# LAYOUT (O RESTO DO CÓDIGO CONTINUA IGUAL)
-# ==========================================
 
 # 1. PAINEL EXECUTIVO
 st.markdown("### 📊 Painel Executivo")
@@ -237,34 +225,28 @@ if not df_visitas.empty:
 
 st.markdown("---")
 
-# 3. AMOSTRAS PENDENTES DE ANÁLISE
+# 3. AMOSTRAS PENDENTES
 st.markdown("### ⏳ Amostras Pendentes de Análise (Coletadas mas não Processadas)")
 URL_FORMULARIO_LAB = "https://ee.kobotoolbox.org/AtOwQDsP"
-
 if not df_amostras.empty:
     df_pendentes = pd.merge(df_amostras, df_visitas[["id_bromelia", "data_visita"]], on="id_bromelia", how="left")
     codigos_com_resultado = df_lab["codigo_amostra"].unique() if not df_lab.empty else []
     df_pendentes["Analisada"] = df_pendentes["codigo_amostra"].isin(codigos_com_resultado)
     df_apenas_pendentes = df_pendentes[~df_pendentes["Analisada"]].copy()
-    
     if not df_apenas_pendentes.empty:
         df_apenas_pendentes["data_visita"] = pd.to_datetime(df_apenas_pendentes["data_visita"], errors="coerce")
         df_apenas_pendentes["Dias de Espera"] = (datetime.now() - df_apenas_pendentes["data_visita"]).dt.days
         df_apenas_pendentes = df_apenas_pendentes.drop_duplicates(subset=["codigo_amostra"])
-        
         df_exibicao = df_apenas_pendentes[["codigo_amostra", "id_bromelia", "data_visita", "Dias de Espera"]].copy()
         df_exibicao["data_visita"] = df_exibicao["data_visita"].dt.strftime('%d/%m/%Y')
         df_exibicao["Ação"] = URL_FORMULARIO_LAB
         df_exibicao = df_exibicao.rename(columns={"codigo_amostra": "Código da Amostra", "id_bromelia": "Planta", "data_visita": "Data da Coleta", "Dias de Espera": "Dias de Espera", "Ação": "Ação"})
         df_exibicao = df_exibicao.sort_values(by="Dias de Espera", ascending=False)
-        
         st.dataframe(df_exibicao[["Código da Amostra", "Planta", "Data da Coleta", "Dias de Espera", "Ação"]], hide_index=True, use_container_width=True, column_config={"Ação": st.column_config.LinkColumn("Ação", display_text="🔬 Analisar")})
-        
         if df_exibicao["Dias de Espera"].max() > 30:
             st.warning(f"⚠️ Existem amostras com mais de 30 dias de espera! A mais antiga está aguardando há {df_exibicao['Dias de Espera'].max()} dias.")
         else:
             st.info("✅ Todas as amostras pendentes foram coletadas há menos de 30 dias.")
-            
         csv_pendentes = df_exibicao.to_csv(index=False).encode('utf-8')
         st.download_button(label="📥 Baixar Lista de Pendências (CSV)", data=csv_pendentes, file_name='amostras_pendentes.csv', mime='text/csv')
     else:
@@ -430,13 +412,3 @@ if not df_visitas.empty:
             stats.append({"Variável": nome, "N": len(dados), "Média": round(dados.mean(), 2), "Mediana": round(dados.median(), 2), "Desvio Padrão": round(dados.std(), 2), "Mínimo": round(dados.min(), 2), "Máximo": round(dados.max(), 2)})
     if stats:
         st.dataframe(pd.DataFrame(stats), hide_index=True, use_container_width=True)
-
-# 11. CORRELAÇÃO ECOLÓGICA
-st.markdown("---")
-st.markdown("### 🔬 Correlação Ecológica: Água vs. Presença de Larvas")
-if not df_visitas.empty and not df_final.empty:
-    df_eco = pd.merge(df_visitas, df_final[["id_bromelia", "positivo"]], on="id_bromelia", how="left")
-    df_eco["Status"] = df_eco["positivo"].apply(lambda x: "Com Aedes" if x else "Sem Aedes")
-    df_eco["ph"] = pd.to_numeric(df_eco["ph"], errors="coerce")
-    df_eco["temp"] = pd.to_numeric(df_eco["temp"], errors="coerce")
-    df
