@@ -12,35 +12,29 @@ from streamlit_folium import st_folium
 from folium.plugins import HeatMap
 from streamlit_autorefresh import st_autorefresh
 
-# --- SISTEMA DE SENHA (BLOQUEIO) ---
+# --- SISTEMA DE SENHA ---
 def check_password():
-    """Retorna True se o usuário digitou a senha correta."""
     def password_entered():
         if st.session_state["password"] == st.secrets.get("SENHA_ACESSO", ""):
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Limpa a senha da memória
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # Primeira execução, mostra o campo de senha
         st.text_input("Digite a senha de acesso ao Dashboard:", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        # Senha errada, mostra o campo novamente com erro
         st.text_input("Digite a senha de acesso ao Dashboard:", type="password", on_change=password_entered, key="password")
         st.error("😕 Senha incorreta. Tente novamente.")
         return False
     else:
-        # Senha correta
         return True
 
 if not check_password():
-    st.stop()  # Para a execução aqui se a senha estiver errada
-# --- FIM DO SISTEMA DE SENHA ---
+    st.stop()
 
 st.set_page_config(page_title="Bromélias & Culicídeos", page_icon="🌿", layout="wide")
-# Atualiza a página a cada 5 minutos (300.000 milissegundos)
 st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
 st.title("🌿 Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.caption(f"Pesquisador: Flávio Santos (IOC - Fiocruz) | Atualizado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
@@ -72,17 +66,12 @@ def normalizar_texto(valor):
     texto = "".join(c for c in texto if not unicodedata.combining(c))
     return " ".join(texto.lower().replace("_", " ").strip().split())
 
-def normalizar_codigo(valor):
-    if valor is None: return None
-    if isinstance(valor, float) and valor.is_integer(): valor = int(valor)
-    return str(valor).strip() or None
-
 def numero_inteiro(valor):
     if valor is None or str(valor).strip() == "": return 0
     try: return max(0, int(float(str(valor).strip().replace(",", "."))))
     except: return 0
 
-# --- CARREGAMENTO ---
+# --- CARREGAMENTO DA API ---
 base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
 token = _get_secret("KOBO_TOKEN")
 uid_campo = _get_secret("UID_CAMPO")
@@ -96,7 +85,7 @@ if not lista_campo:
     st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# --- PROCESSAMENTO ---
+# --- PROCESSAMENTO (BRUTO) ---
 plantas = []
 visitas_list = []
 amostras = []
@@ -115,10 +104,7 @@ for indice, item in enumerate(lista_campo):
             lat, lon = float(p[0]), float(p[1])
         except: pass
         
-    plantas.append({
-        "id_bromelia": id_planta, "bairro": bairro, "genero": genero, 
-        "tipologia": tipologia, "lat": lat, "lon": lon
-    })
+    plantas.append({"id_bromelia": id_planta, "bairro": bairro, "genero": genero, "tipologia": tipologia, "lat": lat, "lon": lon})
 
     visitas = item.get("rep_visitas", [])
     if isinstance(visitas, list):
@@ -129,10 +115,7 @@ for indice, item in enumerate(lista_campo):
             vol = v.get("rep_visitas/volume_agua_ml")
             obs = v.get("rep_visitas/observacoes_visita")
             
-            visitas_list.append({
-                "id_bromelia": id_planta, "data_visita": data_v,
-                "ph": ph, "temp": temp, "vol": vol, "obs": obs
-            })
+            visitas_list.append({"id_bromelia": id_planta, "data_visita": data_v, "ph": ph, "temp": temp, "vol": vol, "obs": obs})
 
             ams = v.get("rep_visitas/rep_amostras", [])
             if isinstance(ams, list):
@@ -141,37 +124,59 @@ for indice, item in enumerate(lista_campo):
                     if cod:
                         amostras.append({"id_bromelia": id_planta, "codigo_amostra": str(cod).strip()})
 
-# --- PROCESSAMENTO DO LABORATÓRIO (O PULO DO GATO) ---
 lab_especies = []
 for item in lista_lab:
     cod_lab = item.get("grp_amostra/codigo_amostra")
     if not cod_lab: continue
-    
-    # AQUI está a mágica: ele itera sobre a lista de espécies que o Kobo envia
-    especies_amostra = item.get("rep_especies", [])
-    if isinstance(especies_amostra, list):
-        for e in especies_amostra:
-            especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
-            qtd_l = numero_inteiro(e.get("rep_especies/qtd_larvas"))
-            qtd_p = numero_inteiro(e.get("rep_especies/qtd_pupas"))
-            
-            lab_especies.append({
-                "codigo_amostra": str(cod_lab).strip(),
-                "especie": normalizar_texto(especie).replace(" ", "_"),
-                "qtd_especimes": qtd_l + qtd_p
-            })
+    for e in item.get("rep_especies", []):
+        especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
+        qtd_l = numero_inteiro(e.get("rep_especies/qtd_larvas"))
+        qtd_p = numero_inteiro(e.get("rep_especies/qtd_pupas"))
+        lab_especies.append({"codigo_amostra": str(cod_lab).strip(), "especie": normalizar_texto(especie).replace(" ", "_"), "qtd_especimes": qtd_l + qtd_p})
 
 df_plantas = pd.DataFrame(plantas).drop_duplicates(subset=["id_bromelia"])
 df_visitas = pd.DataFrame(visitas_list)
 df_amostras = pd.DataFrame(amostras).drop_duplicates(subset=["codigo_amostra"])
 df_lab = pd.DataFrame(lab_especies)
 
+# --- FILTRO DE DATA (NA BARRA LATERAL) ---
+st.sidebar.markdown("---")
+st.sidebar.header("🔎 Filtro de Data")
+
+if not df_visitas.empty:
+    df_visitas["data_visita"] = pd.to_datetime(df_visitas["data_visita"], errors="coerce")
+    datas_validas = df_visitas["data_visita"].dropna()
+    
+    if not datas_validas.empty:
+        data_min = datas_validas.min().date()
+        data_max = datas_validas.max().date()
+        periodo_sel = st.sidebar.date_input("Período da Visita", value=(data_min, data_max), min_value=data_min, max_value=data_max)
+    else:
+        periodo_sel = None
+else:
+    periodo_sel = None
+
+# --- APLICANDO O FILTRO AOS DADOS ---
+if periodo_sel and len(periodo_sel) == 2:
+    data_ini, data_fim = periodo_sel
+    
+    # 1. Filtra as visitas
+    df_visitas = df_visitas[(df_visitas["data_visita"].dt.date >= data_ini) & (df_visitas["data_visita"].dt.date <= data_fim)]
+    
+    # 2. Pega os IDs das plantas que tiveram visita no período
+    ids_plantas_validas = df_visitas["id_bromelia"].unique()
+    df_plantas = df_plantas[df_plantas["id_bromelia"].isin(ids_plantas_validas)]
+    
+    # 3. Filtra amostras e laboratório
+    df_amostras = df_amostras[df_amostras["id_bromelia"].isin(ids_plantas_validas)]
+    if not df_lab.empty and not df_amostras.empty:
+        codigos_validos = df_amostras["codigo_amostra"].unique()
+        df_lab = df_lab[df_lab["codigo_amostra"].isin(codigos_validos)]
+
+# --- CRUZAMENTO FINAL (COM OS DADOS FILTRADOS) ---
 if not df_amostras.empty and not df_lab.empty:
     df_merge = pd.merge(df_amostras, df_lab, on="codigo_amostra", how="left")
-    df_por_planta = df_merge.groupby("id_bromelia").agg({
-        "especie": lambda x: list(x.dropna().unique()),
-        "qtd_especimes": "sum"
-    }).reset_index()
+    df_por_planta = df_merge.groupby("id_bromelia").agg({"especie": lambda x: list(x.dropna().unique()), "qtd_especimes": "sum"}).reset_index()
     df_final = pd.merge(df_plantas, df_por_planta, on="id_bromelia", how="left")
 else:
     df_final = df_plantas.copy()
@@ -183,7 +188,7 @@ df_final["especie_str"] = df_final["especie"].apply(lambda x: ', '.join(x) if is
 df_final["qtd_especimes"] = pd.to_numeric(df_final["qtd_especimes"], errors="coerce").fillna(0)
 
 # ==========================================
-# LAYOUT DO DASHBOARD
+# LAYOUT (O RESTO DO CÓDIGO CONTINUA IGUAL)
 # ==========================================
 
 # 1. PAINEL EXECUTIVO
@@ -230,78 +235,38 @@ if not df_visitas.empty:
     m2.metric("Temperatura Média", f"{df_visitas['temp'].mean():.1f} °C" if not df_visitas['temp'].isna().all() else "—")
     m3.metric("Volume Médio", f"{df_visitas['vol'].mean():.0f} mL" if not df_visitas['vol'].isna().all() else "—")
 
-# 13. AMOSTRAS PENDENTES DE ANÁLISE
 st.markdown("---")
-st.markdown("### ⏳ Amostras Pendentes de Análise (Coletadas mas não Processadas)")
 
-# ⚠️ SUBSTITUA ESTE LINK PELO LINK DO SEU FORMULÁRIO DE LABORATÓRIO NO KOBO
+# 3. AMOSTRAS PENDENTES DE ANÁLISE
+st.markdown("### ⏳ Amostras Pendentes de Análise (Coletadas mas não Processadas)")
 URL_FORMULARIO_LAB = "https://ee.kobotoolbox.org/AtOwQDsP"
 
 if not df_amostras.empty:
-    # 1. Junta as amostras com as datas de visita
     df_pendentes = pd.merge(df_amostras, df_visitas[["id_bromelia", "data_visita"]], on="id_bromelia", how="left")
-    
-    # 2. Verifica quais amostras já têm resultado no lab
     codigos_com_resultado = df_lab["codigo_amostra"].unique() if not df_lab.empty else []
     df_pendentes["Analisada"] = df_pendentes["codigo_amostra"].isin(codigos_com_resultado)
-    
-    # 3. Filtra apenas as que NÃO foram analisadas
     df_apenas_pendentes = df_pendentes[~df_pendentes["Analisada"]].copy()
     
     if not df_apenas_pendentes.empty:
-        # Calcula os dias de espera
         df_apenas_pendentes["data_visita"] = pd.to_datetime(df_apenas_pendentes["data_visita"], errors="coerce")
         df_apenas_pendentes["Dias de Espera"] = (datetime.now() - df_apenas_pendentes["data_visita"]).dt.days
-        
-        # Remove duplicatas
         df_apenas_pendentes = df_apenas_pendentes.drop_duplicates(subset=["codigo_amostra"])
         
-        # Prepara a tabela
         df_exibicao = df_apenas_pendentes[["codigo_amostra", "id_bromelia", "data_visita", "Dias de Espera"]].copy()
         df_exibicao["data_visita"] = df_exibicao["data_visita"].dt.strftime('%d/%m/%Y')
-        
-        # Cria a coluna com o link do formulário
         df_exibicao["Ação"] = URL_FORMULARIO_LAB
-        
-        # Renomeia as colunas
-        df_exibicao = df_exibicao.rename(columns={
-            "codigo_amostra": "Código da Amostra",
-            "id_bromelia": "Planta",
-            "data_visita": "Data da Coleta",
-            "Dias de Espera": "Dias de Espera",
-            "Ação": "Ação"
-        })
-        
-        # Ordena pelos mais antigos
+        df_exibicao = df_exibicao.rename(columns={"codigo_amostra": "Código da Amostra", "id_bromelia": "Planta", "data_visita": "Data da Coleta", "Dias de Espera": "Dias de Espera", "Ação": "Ação"})
         df_exibicao = df_exibicao.sort_values(by="Dias de Espera", ascending=False)
         
-        # Mostra a tabela com o link clicável
-        st.dataframe(
-            df_exibicao[["Código da Amostra", "Planta", "Data da Coleta", "Dias de Espera", "Ação"]],
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Ação": st.column_config.LinkColumn(
-                    "Ação",
-                    display_text="🔬 Analisar"
-                )
-            }
-        )
+        st.dataframe(df_exibicao[["Código da Amostra", "Planta", "Data da Coleta", "Dias de Espera", "Ação"]], hide_index=True, use_container_width=True, column_config={"Ação": st.column_config.LinkColumn("Ação", display_text="🔬 Analisar")})
         
-        # Alerta de atraso
         if df_exibicao["Dias de Espera"].max() > 30:
             st.warning(f"⚠️ Existem amostras com mais de 30 dias de espera! A mais antiga está aguardando há {df_exibicao['Dias de Espera'].max()} dias.")
         else:
             st.info("✅ Todas as amostras pendentes foram coletadas há menos de 30 dias.")
             
-        # Botão de download
         csv_pendentes = df_exibicao.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Baixar Lista de Pendências (CSV)",
-            data=csv_pendentes,
-            file_name='amostras_pendentes.csv',
-            mime='text/csv',
-        )
+        st.download_button(label="📥 Baixar Lista de Pendências (CSV)", data=csv_pendentes, file_name='amostras_pendentes.csv', mime='text/csv')
     else:
         st.success("🎉 Todas as amostras coletadas já foram analisadas no laboratório!")
 else:
@@ -309,7 +274,7 @@ else:
 
 st.markdown("---")
 
-# 3. MAPAS E TERMÔMETRO
+# 4. MAPAS E TERMÔMETRO
 st.markdown("### 🗺️ Mapas de Risco e Termômetro")
 df_mapa = df_final.dropna(subset=["lat", "lon"])
 if not df_mapa.empty:
@@ -337,50 +302,17 @@ if not df_mapa.empty:
             fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(fig_termo, use_container_width=True)
             
-       # --- ABA 2: MAPA DE CALOR ---
     with tab2:
         st.markdown("#### 🔥 Mapa de Calor (Intensidade de Focos)")
-        
-        # Filtra apenas as plantas positivas
         df_calor = df_mapa[df_mapa["positivo"]]
-        
         if not df_calor.empty:
-            # Cria o mapa usando o Plotly (não trava a rolagem)
-            # Aumentei o radius para a mancha ficar maior e mais visível
-            fig_mapa_calor = px.density_mapbox(
-                df_calor, 
-                lat="lat", 
-                lon="lon", 
-                z="qtd_especimes", 
-                radius=60, # Aumentado de 40 para 60
-                center=dict(lat=centro_lat, lon=centro_lon),
-                zoom=13, # Zoom um pouco mais aberto
-                mapbox_style="open-street-map",
-                color_continuous_scale="Inferno" 
-            )
-            
-            # Adiciona os pinos vermelhos por cima do calor
+            fig_mapa_calor = px.density_mapbox(df_calor, lat="lat", lon="lon", z="qtd_especimes", radius=60, center=dict(lat=centro_lat, lon=centro_lon), zoom=13, mapbox_style="open-street-map", color_continuous_scale="Inferno")
             for _, row in df_calor.iterrows():
-                fig_mapa_calor.add_scattermapbox(
-                    lat=[row["lat"]],
-                    lon=[row["lon"]],
-                    mode="markers",
-                    marker=dict(size=12, color="#E63946"),
-                    name="Aedes",
-                    showlegend=False,
-                    hovertext=f"Planta: {row['id_bromelia']}",
-                    hoverinfo="text"
-                )
-
-            fig_mapa_calor.update_layout(
-                margin=dict(l=0, r=0, t=0, b=0), 
-                height=450,
-                coloraxis_showscale=False 
-            )
+                fig_mapa_calor.add_scattermapbox(lat=[row["lat"]], lon=[row["lon"]], mode="markers", marker=dict(size=12, color="#E63946"), name="Aedes", showlegend=False, hovertext=f"Planta: {row['id_bromelia']}", hoverinfo="text")
+            fig_mapa_calor.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False)
             st.plotly_chart(fig_mapa_calor, use_container_width=True)
-            st.info("As manchas indicam a concentração de focos. Os pinos vermelhos mostram a localização exata de cada planta positiva.")
         else:
-            st.info("✅ Nenhuma planta positiva para gerar o mapa de calor no momento.")
+            st.info("✅ Nenhuma planta positiva para gerar o mapa de calor.")
             
     with tab3:
         df_agrupado = df_mapa.groupby(["lat", "lon", "positivo"]).size().reset_index(name="quantidade")
@@ -399,7 +331,7 @@ if not df_mapa.empty:
             fig_bairro.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
             st.plotly_chart(fig_bairro, use_container_width=True)
 
-# 4. SÉRIE TEMPORAL
+# 5. SÉRIE TEMPORAL
 st.markdown("---")
 st.markdown("### 📈 Série Temporal de Coletas")
 if not df_visitas.empty and "data_visita" in df_visitas.columns:
@@ -412,7 +344,7 @@ if not df_visitas.empty and "data_visita" in df_visitas.columns:
     fig.update_layout(barmode="group", height=350, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# 5. ESPÉCIES E ECOLOGIA
+# 6. ESPÉCIES E ECOLOGIA
 st.markdown("---")
 col_esp, col_eco = st.columns([2, 1])
 with col_esp:
@@ -421,13 +353,12 @@ with col_esp:
         df_chart = df_lab.groupby("especie").agg({"qtd_especimes": "sum"}).reset_index()
         df_chart["especie"] = df_chart["especie"].str.replace("_", " ").str.capitalize()
         st.plotly_chart(px.bar(df_chart, x="especie", y="qtd_especimes", text="qtd_especimes", color="especie"), use_container_width=True)
-
 with col_eco:
     st.markdown("### 🔬 pH vs Presença de Larvas")
     if not df_visitas.empty and not df_visitas['ph'].isna().all():
         st.plotly_chart(px.box(df_visitas, y="ph", points="all", color_discrete_sequence=["#E63946"]), use_container_width=True)
 
-# 6. TIPOLOGIA
+# 7. TIPOLOGIA
 st.markdown("---")
 st.markdown("### 🏠 Análise por Tipologia de Imóvel")
 if not df_final.empty and "tipologia" in df_final.columns:
@@ -440,11 +371,10 @@ if not df_final.empty and "tipologia" in df_final.columns:
     fig_tipo.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig_tipo, use_container_width=True)
 
-# 7. TABELAS FINAIS
+# 8. TABELAS FINAIS
 st.markdown("---")
 st.markdown("### 📊 Tabelas de Totais e Estatísticas")
 col_tab1, col_tab2 = st.columns(2)
-
 with col_tab1:
     st.markdown("#### 🦟 Totais por Espécie")
     if not df_lab.empty:
@@ -453,7 +383,6 @@ with col_tab1:
         total = df_esp["Total"].sum()
         df_esp["%"] = (df_esp["Total"] / total * 100).round(1).astype(str) + "%"
         st.dataframe(df_esp.rename(columns={"especie": "Espécie", "Total": "Larvas+Pupas"}), hide_index=True, use_container_width=True)
-
 with col_tab2:
     st.markdown("#### 📈 Estatísticas da Água")
     if not df_visitas.empty:
@@ -465,7 +394,7 @@ with col_tab2:
                 stats.append({"Variável": nome, "N": len(dados), "Média": round(dados.mean(), 2), "Mediana": round(dados.median(), 2), "Desvio Padrão": round(dados.std(), 2)})
         st.dataframe(pd.DataFrame(stats), hide_index=True, use_container_width=True)
 
-# 8. SAZONALIDADE E RANKING
+# 9. SAZONALIDADE E RANKING
 st.markdown("---")
 st.markdown("### 📈 Análise de Sazonalidade e Ranking de Bairros")
 col_saz, col_rank = st.columns([2, 1])
@@ -479,7 +408,6 @@ with col_saz:
         df_saz = df_saz.groupby("mes").agg(Total=("id_bromelia", "nunique"), Positivas=("positivo", "sum")).reset_index()
         df_saz["%"] = (df_saz["Positivas"] / df_saz["Total"] * 100).round(1)
         st.plotly_chart(px.line(df_saz, x="mes", y="%", markers=True, title="Variação da Positividade ao Longo do Tempo"), use_container_width=True)
-
 with col_rank:
     st.markdown("#### 🏘️ Ranking de Bairros (Maior Risco)")
     if not df_final.empty:
@@ -487,7 +415,7 @@ with col_rank:
         df_rank["%"] = (df_rank["Positivas"] / df_rank["Total"] * 100).round(1)
         st.dataframe(df_rank.sort_values(by="%", ascending=False).rename(columns={"bairro": "Bairro", "Total": "Plantas", "Positivas": "Positivas", "%": "% Risco"}), hide_index=True, use_container_width=True)
 
-# 9. ESTATÍSTICA DESCRITIVA
+# 10. ESTATÍSTICA DESCRITIVA
 st.markdown("---")
 st.markdown("### 📈 Estatística Descritiva (Variáveis Ambientais)")
 if not df_visitas.empty:
@@ -503,7 +431,7 @@ if not df_visitas.empty:
     if stats:
         st.dataframe(pd.DataFrame(stats), hide_index=True, use_container_width=True)
 
-# 10. CORRELAÇÃO ECOLÓGICA
+# 11. CORRELAÇÃO ECOLÓGICA
 st.markdown("---")
 st.markdown("### 🔬 Correlação Ecológica: Água vs. Presença de Larvas")
 if not df_visitas.empty and not df_final.empty:
@@ -511,37 +439,4 @@ if not df_visitas.empty and not df_final.empty:
     df_eco["Status"] = df_eco["positivo"].apply(lambda x: "Com Aedes" if x else "Sem Aedes")
     df_eco["ph"] = pd.to_numeric(df_eco["ph"], errors="coerce")
     df_eco["temp"] = pd.to_numeric(df_eco["temp"], errors="coerce")
-    df_eco["vol"] = pd.to_numeric(df_eco["vol"], errors="coerce")
-    
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("#### 🧪 pH")
-        st.plotly_chart(px.box(df_eco.dropna(subset=["ph"]), x="Status", y="ph", color="Status", color_discrete_map={"Com Aedes": "#E63946", "Sem Aedes": "#2E86AB"}), use_container_width=True)
-    with c2:
-        st.markdown("#### 🌡️ Temperatura")
-        st.plotly_chart(px.box(df_eco.dropna(subset=["temp"]), x="Status", y="temp", color="Status", color_discrete_map={"Com Aedes": "#E63946", "Sem Aedes": "#2E86AB"}), use_container_width=True)
-    with c3:
-        st.markdown("#### 💧 Volume")
-        st.plotly_chart(px.box(df_eco.dropna(subset=["vol"]), x="Status", y="vol", color="Status", color_discrete_map={"Com Aedes": "#E63946", "Sem Aedes": "#2E86AB"}), use_container_width=True)
-
-# 11. DISPERSÃO DE ESPÉCIES
-st.markdown("---")
-st.markdown("### 🌿 Relação entre Gênero da Bromélia e Espécies de Mosquitos")
-if not df_lab.empty and not df_final.empty and "genero" in df_final.columns:
-    df_genero = df_final[["id_bromelia", "genero"]].drop_duplicates()
-    df_amostras_genero = pd.merge(df_amostras, df_genero, on="id_bromelia", how="left")
-    df_dispersao = pd.merge(df_amostras_genero, df_lab, on="codigo_amostra", how="inner")
-    
-    if not df_dispersao.empty:
-        df_chart = df_dispersao.groupby(["genero", "especie"]).agg({"qtd_especimes": "sum"}).reset_index()
-        df_chart["genero"] = df_chart["genero"].str.replace("_", " ").str.capitalize()
-        df_chart["especie"] = df_chart["especie"].str.replace("_", " ").str.capitalize()
-        
-        fig_disp = px.bar(df_chart, x="genero", y="qtd_especimes", color="especie", barmode="group", text="qtd_especimes", labels={"genero": "Gênero da Bromélia", "qtd_especimes": "Espécimes", "especie": "Espécie de Mosquito"})
-        fig_disp.update_layout(height=450, margin=dict(l=10, r=10, t=40, b=10))
-        st.plotly_chart(fig_disp, use_container_width=True)
-
-
-
-st.markdown("---")
-st.caption("Dashboard desenvolvido por Flávio Santos | PPG-VCV / IOC - Fiocruz | Contato: fhsantos@gmail.com")
+    df
