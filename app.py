@@ -143,7 +143,9 @@ else:
 
 df_final["positivo"] = df_final["especie"].apply(lambda x: any("aedes" in str(e) for e in x) if isinstance(x, list) else False)
 df_final["especie_str"] = df_final["especie"].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else "Não informado").str.replace("_", " ").str.capitalize()
-df_final["qtd_especimes"] = pd.to_numeric(df_final["qtd_especimes"], errors="coerce").fillna(0)
+plantas = []
+visitas_list = []
+amostras = []
 
 # ==========================================
 # LAYOUT DO DASHBOARD
