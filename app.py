@@ -147,6 +147,89 @@ plantas = []
 visitas_list = []
 amostras = []
 
+for indice, item in enumerate(lista_campo):
+    id_planta = item.get("grp_cadastro/id_bromelia_calc") or f"SEM-ID-{indice}"
+    bairro = item.get("grp_cadastro/bairro") or "N/I"
+    genero = item.get("grp_cadastro/genero") or "N/I"
+    # Adiciona a tipologia do imóvel
+    tipologia = item.get("grp_cadastro/tipologia_imovel") or "N/I"
+    
+    geo = item.get("grp_cadastro/geolocalizacao", "")
+    lat, lon = None, None
+    if isinstance(geo, str) and " " in geo:
+        try:
+            p = geo.split()
+            lat, lon = float(p[0]), float(p[1])
+        except: pass
+        
+    plantas.append({
+        "id_bromelia": id_planta, 
+        "bairro": bairro, 
+        "genero": genero, 
+        "tipologia": tipologia, 
+        "lat": lat, 
+        "lon": lon
+    })
+
+    visitas = item.get("rep_visitas", [])
+    if isinstance(visitas, list):
+        for v in visitas:
+            data_v = v.get("rep_visitas/data_visita")
+            ph = v.get("rep_visitas/ph_agua")
+            temp = v.get("rep_visitas/temp_agua_c")
+            vol = v.get("rep_visitas/volume_agua_ml")
+            obs = v.get("rep_visitas/observacoes_visita")
+            
+            visitas_list.append({
+                "id_bromelia": id_planta, "data_visita": data_v,
+                "ph": ph, "temp": temp, "vol": vol, "obs": obs
+            })
+
+            ams = v.get("rep_visitas/rep_amostras", [])
+            if isinstance(ams, list):
+                for a in ams:
+                    cod = a.get("rep_visitas/rep_amostras/codigo_amostra")
+                    if cod:
+                        amostras.append({"id_bromelia": id_planta, "codigo_amostra": str(cod).strip()})
+
+lab_especies = []
+for item in lista_lab:
+    cod_lab = item.get("grp_amostra/codigo_amostra")
+    if not cod_lab: continue
+    
+    for e in item.get("rep_especies", []):
+        especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
+        qtd_l = numero_inteiro(e.get("rep_especies/qtd_larvas"))
+        qtd_p = numero_inteiro(e.get("rep_especies/qtd_pupas"))
+        
+        lab_especies.append({
+            "codigo_amostra": str(cod_lab).strip(),
+            "especie": normalizar_texto(especie).replace(" ", "_"),
+            "qtd_especimes": qtd_l + qtd_p
+        })
+
+df_plantas = pd.DataFrame(plantas).drop_duplicates(subset=["id_bromelia"])
+df_visitas = pd.DataFrame(visitas_list)
+df_amostras = pd.DataFrame(amostras).drop_duplicates(subset=["codigo_amostra"])
+df_lab = pd.DataFrame(lab_especies)
+
+# --- CRUZAMENTO FINAL ---
+if not df_amostras.empty and not df_lab.empty:
+    df_merge = pd.merge(df_amostras, df_lab, on="codigo_amostra", how="left")
+    df_por_planta = df_merge.groupby("id_bromelia").agg({
+        "especie": lambda x: list(x.dropna().unique()),
+        "qtd_especimes": "sum"
+    }).reset_index()
+    df_final = pd.merge(df_plantas, df_por_planta, on="id_bromelia", how="left")
+else:
+    df_final = df_plantas.copy()
+    df_final["especie"] = [[] for _ in range(len(df_final))]
+    df_final["qtd_especimes"] = 0
+
+df_final["positivo"] = df_final["especie"].apply(lambda x: any("aedes" in str(e) for e in x) if isinstance(x, list) else False)
+df_final["especie_str"] = df_final["especie"].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else "Não informado").str.replace("_", " ").str.capitalize()
+df_final["qtd_especimes"] = pd.to_numeric(df_final["qtd_especimes"], errors="coerce").fillna(0)
+
 # ==========================================
 # LAYOUT DO DASHBOARD
 # ==========================================
