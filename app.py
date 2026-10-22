@@ -75,6 +75,7 @@ for indice, item in enumerate(lista_campo):
     id_planta = item.get("grp_cadastro/id_bromelia_calc") or f"SEM-ID-{indice}"
     bairro = item.get("grp_cadastro/bairro") or "N/I"
     genero = item.get("grp_cadastro/genero") or "N/I"
+     tipologia = item.get("grp_cadastro/tipologia_imovel") or "N/I" 
     
     geo = item.get("grp_cadastro/geolocalizacao", "")
     lat, lon = None, None
@@ -84,7 +85,7 @@ for indice, item in enumerate(lista_campo):
             lat, lon = float(p[0]), float(p[1])
         except: pass
         
-    plantas.append({"id_bromelia": id_planta, "bairro": bairro, "genero": genero, "lat": lat, "lon": lon})
+    plantas.append({"id_bromelia": id_planta, "bairro": bairro, "genero": genero, "tipologia": tipologia, "lat": lat, "lon": lon})
 
     visitas = item.get("rep_visitas", [])
     if isinstance(visitas, list):
