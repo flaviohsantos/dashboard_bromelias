@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Dashboard — Bromélias Ornamentais Urbanas e Culicídeos."""
+"""Dashboard — Bromélias Ornamentais Urbanas e Culicídeos (registro por LOCAL).
+
+Modelo: cada local (ex.: calçada) tem uma coordenada. Em cada visita registra-se quantas bromélias
+foram examinadas, quantas estavam secas e quantas tinham água sem imaturos; cada bromélia COM imaturos
+gera uma amostra (código, pH, temperatura, volume) que é analisada no laboratório.
+
+Fontes (Kobo): cadastro dos locais (UID_CAMPO), visitas periódicas (UID_VISITA) e laboratório (UID_LAB).
+As visitas se ligam ao cadastro pelo código do local.
+"""
 import difflib
 import hmac
 import os
@@ -24,6 +32,12 @@ FUSO = ZoneInfo("America/Sao_Paulo")
 AGORA = datetime.now(FUSO)
 HOJE = pd.Timestamp(AGORA.date())
 URL_FORMULARIO_LAB = "https://ee.kobotoolbox.org/AtOwQDsP"
+
+# Faixas do alerta (% de locais positivos). Ajustar conforme definição da pesquisa.
+RISCO_MEDIO = 15
+RISCO_ALTO = 40
+# Visita mensal: acima deste prazo (dias desde a última visita) o local aparece como atrasado
+PRAZO_VISITA_DIAS = 35
 
 # Critério de positividade: aplicado ao nome normalizado da espécie (ex.: "aedes_aegypti")
 CRITERIOS = {
@@ -109,8 +123,13 @@ def para_numero(serie):
     return pd.to_numeric(serie.astype(str).str.replace(",", ".", regex=False), errors="coerce")
 
 
-def plantas_positivas_por_criterio(df_lab, df_amostras):
-    """Nº de plantas positivas para cada critério (independe da seleção na barra lateral)."""
+def pct(num, den):
+    """Percentual com proteção contra divisão por zero (retorna NaN)."""
+    return (num / den.where(den > 0) * 100).round(1)
+
+
+def locais_positivos_por_criterio(df_lab, df_amostras):
+    """Nº de locais positivos para cada critério (independe da seleção na barra lateral)."""
     out = {}
     for nome, fn in CRITERIOS.items():
         if df_lab.empty:
@@ -118,7 +137,7 @@ def plantas_positivas_por_criterio(df_lab, df_amostras):
             continue
         mask = df_lab["especie"].apply(fn).astype(bool)
         cods = df_lab.loc[mask, "codigo_amostra"].unique()
-        out[nome] = int(df_amostras.loc[df_amostras["codigo_amostra"].isin(cods), "id_bromelia"].nunique())
+        out[nome] = int(df_amostras.loc[df_amostras["codigo_amostra"].isin(cods), "id_local"].nunique())
     return out
 
 
@@ -139,10 +158,12 @@ base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
 token = _get_secret("KOBO_TOKEN")
 uid_campo = _get_secret("UID_CAMPO")
 uid_lab = _get_secret("UID_LAB")
+uid_visita = _get_secret("UID_VISITA")   # projeto de visita periódica (opcional)
 
 with st.spinner("Baixando dados do Kobo..."):
     try:
         lista_campo = baixar_formulario(uid_campo, token, base_url)
+        lista_visita = baixar_formulario(uid_visita, token, base_url)
         lista_lab = baixar_formulario(uid_lab, token, base_url)
     except requests.RequestException as exc:
         st.error(f"Falha ao baixar dados do Kobo: {exc}")
@@ -152,14 +173,12 @@ if not lista_campo:
     st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# --- PROCESSAMENTO ---
-plantas, visitas_list, amostras = [], [], []
+# --- PROCESSAMENTO: CAMPO ---
+locais, visitas_list, amostras = [], [], []
 
 for indice, item in enumerate(lista_campo):
-    # Lê o ID do local (formulário v5) ou o ID da planta (formulário antigo)
-    id_planta = item.get("grp_cadastro/id_local_calc") or item.get("grp_cadastro/id_bromelia_calc") or f"SEM-ID-{indice}"
+    id_local = normalizar_codigo(item.get("grp_cadastro/id_local_calc") or "") or f"SEM-ID-{indice}"
     bairro = item.get("grp_cadastro/bairro") or "N/I"
-    genero = item.get("grp_cadastro/genero") or "N/I"
     tipologia = item.get("grp_cadastro/tipologia_imovel") or "N/I"
 
     geo = item.get("grp_cadastro/geolocalizacao", "")
@@ -171,8 +190,7 @@ for indice, item in enumerate(lista_campo):
         except ValueError:
             pass
 
-    plantas.append({"id_bromelia": id_planta, "bairro": bairro, "genero": genero,
-                    "tipologia": tipologia, "lat": lat, "lon": lon})
+    locais.append({"id_local": id_local, "bairro": bairro, "tipologia": tipologia, "lat": lat, "lon": lon})
 
     visitas = item.get("rep_visitas", [])
     if not isinstance(visitas, list):
@@ -181,20 +199,93 @@ for indice, item in enumerate(lista_campo):
         id_visita = f"{indice}-{n_visita}"
         data_v = v.get("rep_visitas/data_visita")
         visitas_list.append({
-            "id_visita": id_visita, "id_bromelia": id_planta, "data_visita": data_v,
-            "ph": v.get("rep_visitas/ph_agua"),
-            "temp": v.get("rep_visitas/temp_agua_c"),
-            "vol": v.get("rep_visitas/volume_agua_ml"),
+            "id_visita": id_visita, "id_local": id_local, "data_visita": data_v,
+            "n_exam": v.get("rep_visitas/qtd_bromelias_examinadas"),
+            "n_secas": v.get("rep_visitas/qtd_secas"),
+            "n_agua_sem": v.get("rep_visitas/qtd_agua_sem_imaturos"),
         })
         ams = v.get("rep_visitas/rep_amostras", [])
-        if isinstance(ams, list):
-            for a in ams:
-                cod = a.get("rep_visitas/rep_amostras/codigo_amostra")
-                if cod and str(cod).strip():
-                    # A data da coleta fica junto da amostra (não é inferida depois pela planta)
-                    amostras.append({"id_visita": id_visita, "id_bromelia": id_planta,
-                                     "codigo_amostra": normalizar_codigo(cod), "data_visita": data_v})
+        if not isinstance(ams, list):
+            continue
+        for a in ams:
+            cod = a.get("rep_visitas/rep_amostras/codigo_amostra")
+            if cod and str(cod).strip():
+                # Cada amostra = uma bromélia com imaturos; a data da coleta fica junto da amostra
+                amostras.append({
+                    "id_visita": id_visita, "id_local": id_local, "codigo_amostra": normalizar_codigo(cod),
+                    "data_visita": data_v,
+                    "ph": a.get("rep_visitas/rep_amostras/ph_agua"),
+                    "temp": a.get("rep_visitas/rep_amostras/temp_agua_c"),
+                    "vol": a.get("rep_visitas/rep_amostras/volume_agua_ml"),
+                    "genero": a.get("rep_visitas/rep_amostras/genero") or "N/I",
+                    "porte": a.get("rep_visitas/rep_amostras/porte") or "N/I",
+                })
 
+# --- PROCESSAMENTO: VISITAS PERIÓDICAS (uma submissão = uma visita a um local já cadastrado) ---
+locais_via_visita = {}   # código -> dados copiados do cadastro pelo formulário de visita
+for indice, item in enumerate(lista_visita):
+    id_local = normalizar_codigo(item.get("grp_identificacao/id_bromelia_visita") or "")
+    if not id_local:
+        continue
+    id_visita = f"V{indice}"
+    data_v = item.get("grp_dados_visita/data_visita")
+    visitas_list.append({
+        "id_visita": id_visita, "id_local": id_local, "data_visita": data_v,
+        "n_exam": item.get("grp_dados_visita/qtd_bromelias_examinadas"),
+        "n_secas": item.get("grp_dados_visita/qtd_secas"),
+        "n_agua_sem": item.get("grp_dados_visita/qtd_agua_sem_imaturos"),
+    })
+    try:
+        lat_v = float(item.get("grp_identificacao/latitude"))
+        lon_v = float(item.get("grp_identificacao/longitude"))
+    except (TypeError, ValueError):
+        lat_v, lon_v = None, None
+    locais_via_visita.setdefault(id_local, {
+        "bairro": item.get("grp_identificacao/bairro") or "N/I", "lat": lat_v, "lon": lon_v})
+    for a in item.get("rep_amostras", []) or []:
+        cod = a.get("rep_amostras/codigo_amostra")
+        if cod and str(cod).strip():
+            amostras.append({
+                "id_visita": id_visita, "id_local": id_local, "codigo_amostra": normalizar_codigo(cod),
+                "data_visita": data_v,
+                "ph": a.get("rep_amostras/ph_agua"),
+                "temp": a.get("rep_amostras/temp_agua_c"),
+                "vol": a.get("rep_amostras/volume_agua_ml"),
+                "genero": a.get("rep_amostras/genero") or "N/I",
+                "porte": a.get("rep_amostras/porte") or "N/I",
+            })
+
+COLS_AM = ["id_visita", "id_local", "codigo_amostra", "data_visita", "ph", "temp", "vol", "genero", "porte"]
+df_locais_bruto = pd.DataFrame(locais, columns=["id_local", "bairro", "tipologia", "lat", "lon"])
+# Visita com código que não está no cadastro: o local é criado com os dados copiados na própria visita
+codigos_visita_sem_cadastro = sorted(set(locais_via_visita) - set(df_locais_bruto["id_local"]))
+if codigos_visita_sem_cadastro:
+    df_extra = pd.DataFrame([{"id_local": c, "bairro": locais_via_visita[c]["bairro"], "tipologia": "N/I",
+                              "lat": locais_via_visita[c]["lat"], "lon": locais_via_visita[c]["lon"]}
+                             for c in codigos_visita_sem_cadastro])
+    df_locais_bruto = pd.concat([df_locais_bruto, df_extra], ignore_index=True)
+df_amostras_bruto = pd.DataFrame(amostras, columns=COLS_AM)
+
+# Colisões de código (não deveriam existir): o app mantém só o primeiro registro e avisa
+ids_locais_duplicados = sorted(df_locais_bruto.loc[df_locais_bruto["id_local"].duplicated(), "id_local"].unique())
+codigos_campo_duplicados = sorted(
+    df_amostras_bruto.loc[df_amostras_bruto["codigo_amostra"].duplicated(), "codigo_amostra"].unique())
+
+df_locais = df_locais_bruto.drop_duplicates(subset=["id_local"])
+df_amostras = df_amostras_bruto.drop_duplicates(subset=["codigo_amostra"])
+df_visitas = pd.DataFrame(visitas_list, columns=["id_visita", "id_local", "data_visita", "n_exam", "n_secas", "n_agua_sem"])
+
+for col in ["n_exam", "n_secas", "n_agua_sem"]:
+    df_visitas[col] = df_visitas[col].apply(numero_inteiro).astype(int)
+# Bromélias com imaturos = examinadas − secas − com água sem imaturos (igual ao cálculo do formulário)
+df_visitas["n_com"] = (df_visitas["n_exam"] - df_visitas["n_secas"] - df_visitas["n_agua_sem"]).clip(lower=0)
+
+df_visitas["data_visita"] = pd.to_datetime(df_visitas["data_visita"], errors="coerce")
+df_amostras["data_visita"] = pd.to_datetime(df_amostras["data_visita"], errors="coerce")
+for col in ["ph", "temp", "vol"]:
+    df_amostras[col] = para_numero(df_amostras[col])
+
+# --- PROCESSAMENTO: LABORATÓRIO ---
 # Uma análise por amostra: se o mesmo código foi enviado mais de uma vez, vale o envio mais recente
 lab_por_codigo = {}
 codigos_lab_duplicados = set()
@@ -230,26 +321,19 @@ for cod_lab, item in lab_por_codigo.items():
                      else "positivo" if "positivo" in res_linhas else "negativo")
     resultados_lab[cod_lab] = res_geral
 
-df_plantas = pd.DataFrame(plantas, columns=["id_bromelia", "bairro", "genero", "tipologia", "lat", "lon"]
-                          ).drop_duplicates(subset=["id_bromelia"])
-df_visitas = pd.DataFrame(visitas_list, columns=["id_visita", "id_bromelia", "data_visita", "ph", "temp", "vol"])
-df_amostras = pd.DataFrame(amostras, columns=["id_visita", "id_bromelia", "codigo_amostra", "data_visita"]
-                           ).drop_duplicates(subset=["codigo_amostra"])
 df_lab = pd.DataFrame(lab_especies, columns=["codigo_amostra", "especie", "qtd_especimes"])
-
-df_visitas["data_visita"] = pd.to_datetime(df_visitas["data_visita"], errors="coerce")
-df_amostras["data_visita"] = pd.to_datetime(df_amostras["data_visita"], errors="coerce")
-for col in ["ph", "temp", "vol"]:
-    df_visitas[col] = para_numero(df_visitas[col])
 
 # Códigos do laboratório que não existem em nenhuma coleta (provável erro de digitação)
 df_amostras_todas = df_amostras.copy()
 codigos_lab_orfaos = sorted(codigos_lab - set(df_amostras["codigo_amostra"]))
 
+df_visitas_todas = df_visitas.copy()
+df_locais_todos = df_locais.copy()
+
 # --- BARRA LATERAL: CRITÉRIO E FILTRO DE DATA ---
 st.sidebar.header("🦟 Critério de positividade")
 criterio_nome = st.sidebar.selectbox("Espécie-alvo", list(CRITERIOS), index=0,
-                                     help="Define o que conta como planta positiva em todo o painel.")
+                                     help="Define o que conta como positivo em todo o painel.")
 criterio_fn = CRITERIOS[criterio_nome]
 
 st.sidebar.markdown("---")
@@ -265,13 +349,17 @@ if periodo_sel and len(periodo_sel) == 2:
     ini = pd.Timestamp(periodo_sel[0])
     fim = pd.Timestamp(periodo_sel[1]) + pd.Timedelta(days=1)
     df_visitas = df_visitas[(df_visitas["data_visita"] >= ini) & (df_visitas["data_visita"] < fim)]
-    # Amostras filtradas pela data da PRÓPRIA coleta (e não pela planta)
+    # Amostras filtradas pela data da PRÓPRIA coleta (e não pelo local)
     df_amostras = df_amostras[(df_amostras["data_visita"] >= ini) & (df_amostras["data_visita"] < fim)]
-    df_plantas = df_plantas[df_plantas["id_bromelia"].isin(df_visitas["id_bromelia"].unique())]
+    df_locais = df_locais[df_locais["id_local"].isin(df_visitas["id_local"].unique())]
+
+if df_locais.empty:
+    st.warning("Nenhum local com visita no período selecionado.")
+    st.stop()
 
 df_lab = df_lab[df_lab["codigo_amostra"].isin(df_amostras["codigo_amostra"])].copy()
 
-# --- RESULTADO POR AMOSTRA ---
+# --- RESULTADO POR AMOSTRA (cada amostra = uma bromélia com imaturos) ---
 df_lab["alvo"] = df_lab["especie"].apply(criterio_fn).astype(bool)
 df_lab["qtd_alvo"] = df_lab["qtd_especimes"].where(df_lab["alvo"], 0)
 
@@ -289,56 +377,72 @@ df_am["resultado_lab"] = df_am["codigo_amostra"].map(resultados_lab).fillna("")
 # Espécie-alvo encontrada = positiva, mesmo que o resultado geral esteja inconclusivo
 df_am["inconclusiva"] = df_am["registrada_lab"] & (df_am["resultado_lab"] == "inconclusivo") & ~df_am["positiva"]
 df_am["analisada"] = df_am["registrada_lab"] & ~df_am["inconclusiva"]
+df_am["pendente"] = ~df_am["registrada_lab"]
 df_am["qtd_total"] = pd.to_numeric(df_am["qtd_total"], errors="coerce").fillna(0)
 df_am["qtd_alvo"] = pd.to_numeric(df_am["qtd_alvo"], errors="coerce").fillna(0)
 
-# --- RESULTADO POR PLANTA ---
-if df_am.empty:
-    df_pl = pd.DataFrame(columns=["id_bromelia", "amostras", "analisadas", "positivas", "qtd_total", "qtd_alvo"])
-else:
-    df_pl = df_am.groupby("id_bromelia").agg(
-        amostras=("codigo_amostra", "count"), analisadas=("analisada", "sum"),
-        positivas=("positiva", "sum"), qtd_total=("qtd_total", "sum"), qtd_alvo=("qtd_alvo", "sum")
-    ).reset_index()
+# --- RESULTADO POR LOCAL ---
+df_vis_loc = df_visitas.groupby("id_local").agg(
+    visitas=("id_visita", "count"), n_exam=("n_exam", "sum"), n_secas=("n_secas", "sum"),
+    n_agua_sem=("n_agua_sem", "sum"), n_com=("n_com", "sum")).reset_index()
 
-df_final = df_plantas.merge(df_pl, on="id_bromelia", how="left")
-for col in ["amostras", "analisadas", "positivas", "qtd_total", "qtd_alvo"]:
+if df_am.empty:
+    df_am_loc = pd.DataFrame(columns=["id_local", "amostras", "analisadas", "pendentes", "inconclusivas",
+                                      "positivas", "qtd_total", "qtd_alvo"])
+else:
+    df_am_loc = df_am.groupby("id_local").agg(
+        amostras=("codigo_amostra", "count"), analisadas=("analisada", "sum"), pendentes=("pendente", "sum"),
+        inconclusivas=("inconclusiva", "sum"), positivas=("positiva", "sum"),
+        qtd_total=("qtd_total", "sum"), qtd_alvo=("qtd_alvo", "sum")).reset_index()
+
+df_final = df_locais.merge(df_vis_loc, on="id_local", how="left").merge(df_am_loc, on="id_local", how="left")
+for col in ["visitas", "n_exam", "n_secas", "n_agua_sem", "n_com", "amostras", "analisadas", "pendentes",
+            "inconclusivas", "positivas", "qtd_total", "qtd_alvo"]:
     df_final[col] = pd.to_numeric(df_final[col], errors="coerce").fillna(0)
-df_final["analisada"] = df_final["analisadas"] > 0
+
+# Status do local: Positivo (alguma bromélia com a espécie-alvo); Negativo (todas as amostras já
+# analisadas sem a espécie-alvo, ou nenhuma bromélia com imaturos); Sem análise (pendente/inconclusiva)
 df_final["positivo"] = df_final["positivas"] > 0
+df_final["resolvido"] = df_final["positivo"] | ((df_final["pendentes"] == 0) & (df_final["inconclusivas"] == 0))
 df_final["status"] = "Sem análise"
-df_final.loc[df_final["analisada"], "status"] = "Negativo"
+df_final.loc[df_final["resolvido"], "status"] = "Negativo"
 df_final.loc[df_final["positivo"], "status"] = "Positivo"
 
-if df_final.empty:
-    st.warning("Nenhuma planta com visita no período selecionado.")
-    st.stop()
+# --- INDICADORES ---
+n_locais = len(df_final)
+n_resolvidos = int(df_final["resolvido"].sum())
+locais_positivos = int(df_final["positivo"].sum())
+positividade = (locais_positivos / n_resolvidos * 100) if n_resolvidos else 0.0   # % de locais positivos
 
-# Positividade: plantas positivas ÷ plantas COM amostra analisada
-df_analisadas = df_final[df_final["analisada"]]
-n_plantas = len(df_final)
-n_analisadas = len(df_analisadas)
-plantas_positivas = int(df_analisadas["positivo"].sum())
-positividade = (plantas_positivas / n_analisadas * 100) if n_analisadas else 0.0
+n_exam = int(df_final["n_exam"].sum())
+n_com = int(df_final["n_com"].sum())
+n_agua = n_com + int(df_final["n_agua_sem"].sum())
+bromelias_positivas = int(df_am["positiva"].sum())
+n_sem_resultado = int(df_am["pendente"].sum() + df_am["inconclusiva"].sum())
+base_bromelias = n_exam - n_sem_resultado
+positividade_bromelias = (bromelias_positivas / base_bromelias * 100) if base_bromelias > 0 else 0.0
 total_especimes = int(df_final["qtd_total"].sum())
 
 df_rank = df_final.groupby("bairro").agg(
-    Plantas=("id_bromelia", "count"), Analisadas=("analisada", "sum"), Positivas=("positivo", "sum")
-).reset_index()
-df_rank["% Risco"] = (df_rank["Positivas"] / df_rank["Analisadas"].where(df_rank["Analisadas"] > 0) * 100).round(1)
+    Locais=("id_local", "count"), Com_resultado=("resolvido", "sum"), Locais_positivos=("positivo", "sum"),
+    Bromelias=("n_exam", "sum"), Positivas=("positivas", "sum"),
+    Pendentes=("pendentes", "sum"), Inconclusivas=("inconclusivas", "sum")).reset_index()
+df_rank["% Locais positivos"] = pct(df_rank["Locais_positivos"], df_rank["Com_resultado"])
+df_rank["Positividade de bromélias (%)"] = pct(
+    df_rank["Positivas"], df_rank["Bromelias"] - df_rank["Pendentes"] - df_rank["Inconclusivas"])
 
 bairro_alerta = "Nenhum"
-df_top = df_rank.dropna(subset=["% Risco"])
-df_top = df_top[df_top["% Risco"] > 0].sort_values("% Risco", ascending=False)
+df_top = df_rank.dropna(subset=["% Locais positivos"])
+df_top = df_top[df_top["% Locais positivos"] > 0].sort_values("% Locais positivos", ascending=False)
 if not df_top.empty:
     t = df_top.iloc[0]
-    bairro_alerta = f"{str(t['bairro']).capitalize()} ({int(t['Positivas'])}/{int(t['Analisadas'])} plantas)"
+    bairro_alerta = f"{str(t['bairro']).capitalize()} ({int(t['Locais_positivos'])}/{int(t['Com_resultado'])} locais)"
 
-if n_analisadas == 0:
-    nivel, bg, cor, icone, msg = "SEM DADOS", "#EEEEEE", "#666666", "ℹ️", "Nenhuma planta com amostra analisada no período."
-elif positividade < 15:
+if n_resolvidos == 0:
+    nivel, bg, cor, icone, msg = "SEM DADOS", "#EEEEEE", "#666666", "ℹ️", "Nenhum local com resultado de laboratório no período."
+elif positividade < RISCO_MEDIO:
     nivel, bg, cor, icone, msg = "BAIXO", "#D6EAF8", "#2E86AB", "✅", "Risco Baixo."
-elif positividade < 40:
+elif positividade < RISCO_ALTO:
     nivel, bg, cor, icone, msg = "MÉDIO", "#FDEBD0", "#F4A261", "⚠️", f"Risco Médio. Atenção ao bairro {bairro_alerta}."
 else:
     nivel, bg, cor, icone, msg = "ALTO", "#FADBD8", "#E63946", "🚨", f"Risco Alto. Ação urgente no bairro {bairro_alerta}."
@@ -347,17 +451,23 @@ else:
 st.markdown("### 📊 Painel Executivo")
 col_kpis, col_alerta = st.columns([3, 2])
 with col_kpis:
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Plantas", n_plantas)
-    c2.metric("Analisadas", n_analisadas)
-    c3.metric("Positivas", plantas_positivas)
-    c4.metric("Positividade", f"{positividade:.1f}%")
-    c5.metric("Espécimes (Lab)", total_especimes)
-    st.caption(f"Positividade = plantas com {criterio_nome} ÷ plantas com amostra analisada. "
-               f"Plantas sem análise: {n_plantas - n_analisadas}. "
-               f"Amostras inconclusivas (fora do cálculo): {int(df_am['inconclusiva'].sum())}.")
-    por_criterio = plantas_positivas_por_criterio(df_lab, df_amostras)
-    st.caption("Plantas positivas por espécie (período): " + " · ".join(f"{k}: {v}" for k, v in por_criterio.items()))
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Locais", n_locais)
+    a2.metric("Bromélias examinadas", n_exam)
+    a3.metric("Com imaturos", n_com)
+    b1, b2, b3 = st.columns(3)
+    b1.metric("Bromélias positivas", bromelias_positivas)
+    b2.metric("Positividade de bromélias", f"{positividade_bromelias:.1f}%")
+    b3.metric("Locais positivos", f"{locais_positivos}/{n_resolvidos}")
+    st.caption(f"Critério: {criterio_nome}. Positividade do local = locais positivos ÷ locais com resultado "
+               f"({n_locais - n_resolvidos} sem resultado: amostras pendentes ou inconclusivas). "
+               f"Positividade de bromélias = bromélias positivas ÷ examinadas, descontadas as sem resultado "
+               f"({n_sem_resultado}).")
+    st.caption(f"Bromélias com água: {n_agua} ({n_agua / n_exam * 100:.0f}% das examinadas)" if n_exam else
+               "Sem bromélias examinadas.")
+    st.caption(f"Espécimes no laboratório (larvas + pupas + adultos): {total_especimes}")
+    por_criterio = locais_positivos_por_criterio(df_lab, df_amostras)
+    st.caption("Locais positivos por espécie (período): " + " · ".join(f"{k}: {v}" for k, v in por_criterio.items()))
 
 with col_alerta:
     st.markdown(f"""<div style="background-color: {bg}; padding: 15px; border-radius: 10px; border-left: 5px solid {cor}; height: 100%;">
@@ -367,28 +477,29 @@ with col_alerta:
 st.markdown("---")
 
 # 2. MÉDIAS DA ÁGUA
-st.markdown("### 💧 Médias da Água")
-if not df_visitas.empty:
+st.markdown("### 💧 Médias da Água (bromélias com imaturos)")
+st.caption("pH, temperatura e volume são medidos apenas nas bromélias com imaturos.")
+if not df_am.empty:
     m1, m2, m3 = st.columns(3)
-    m1.metric("pH Médio", f"{df_visitas['ph'].mean():.1f}" if df_visitas["ph"].notna().any() else "—")
-    m2.metric("Temperatura Média", f"{df_visitas['temp'].mean():.1f} °C" if df_visitas["temp"].notna().any() else "—")
-    m3.metric("Volume Médio", f"{df_visitas['vol'].mean():.0f} mL" if df_visitas["vol"].notna().any() else "—")
+    m1.metric("pH Médio", f"{df_am['ph'].mean():.1f}" if df_am["ph"].notna().any() else "—")
+    m2.metric("Temperatura Média", f"{df_am['temp'].mean():.1f} °C" if df_am["temp"].notna().any() else "—")
+    m3.metric("Volume Médio", f"{df_am['vol'].mean():.0f} mL" if df_am["vol"].notna().any() else "—")
 
 st.markdown("---")
 
 # 3. AMOSTRAS PENDENTES
 st.markdown("### ⏳ Amostras Pendentes de Análise (Coletadas mas não Processadas)")
 if not df_am.empty:
-    df_pend = df_am[~df_am["registrada_lab"]].copy()
+    df_pend = df_am[df_am["pendente"]].copy()
     if not df_pend.empty:
         df_pend["Dias de Espera"] = (HOJE - df_pend["data_visita"]).dt.days.astype("Int64")
-        df_exibicao = df_pend[["codigo_amostra", "id_bromelia", "data_visita", "Dias de Espera"]].copy()
+        df_exibicao = df_pend[["codigo_amostra", "id_local", "data_visita", "Dias de Espera"]].copy()
         df_exibicao["data_visita"] = df_exibicao["data_visita"].dt.strftime("%d/%m/%Y")
         df_exibicao["Ação"] = URL_FORMULARIO_LAB
-        df_exibicao = df_exibicao.rename(columns={"codigo_amostra": "Código da Amostra", "id_bromelia": "Planta",
+        df_exibicao = df_exibicao.rename(columns={"codigo_amostra": "Código da Amostra", "id_local": "Local",
                                                   "data_visita": "Data da Coleta"})
         df_exibicao = df_exibicao.sort_values(by="Dias de Espera", ascending=False)
-        st.dataframe(df_exibicao[["Código da Amostra", "Planta", "Data da Coleta", "Dias de Espera", "Ação"]],
+        st.dataframe(df_exibicao[["Código da Amostra", "Local", "Data da Coleta", "Dias de Espera", "Ação"]],
                      hide_index=True, use_container_width=True,
                      column_config={"Ação": st.column_config.LinkColumn("Ação", display_text="🔬 Analisar")})
         dias_max = df_exibicao["Dias de Espera"].max()
@@ -404,6 +515,7 @@ if not df_am.empty:
 else:
     st.info("Ainda não há amostras coletadas para verificar.")
 
+# Verificações de qualidade dos dados
 if codigos_lab_orfaos:
     with st.expander(f"⚠️ {len(codigos_lab_orfaos)} código(s) do laboratório sem coleta correspondente"):
         codigos_campo = sorted(set(df_amostras_todas["codigo_amostra"]))
@@ -415,6 +527,48 @@ if codigos_lab_duplicados:
     st.warning(f"⚠️ {len(codigos_lab_duplicados)} código(s) com mais de um envio no laboratório "
                f"(vale o mais recente): {', '.join(sorted(codigos_lab_duplicados))}")
 
+if ids_locais_duplicados:
+    st.warning(f"⚠️ Código de local repetido em cadastros diferentes (só o primeiro é usado): "
+               f"{', '.join(ids_locais_duplicados)}")
+
+if codigos_campo_duplicados:
+    st.warning(f"⚠️ Código de amostra repetido no campo (só o primeiro é usado): "
+               f"{', '.join(codigos_campo_duplicados)}")
+
+df_cont = df_am.groupby("id_visita").size().rename("n_amostras").reset_index()
+df_chk = df_visitas.merge(df_cont, on="id_visita", how="left").fillna({"n_amostras": 0})
+df_incons = df_chk[df_chk["n_com"] != df_chk["n_amostras"]]
+if not df_incons.empty:
+    with st.expander(f"⚠️ {len(df_incons)} visita(s) em que o nº de amostras difere do nº de bromélias com imaturos"):
+        st.dataframe(df_incons[["id_local", "data_visita", "n_com", "n_amostras"]].rename(
+            columns={"id_local": "Local", "data_visita": "Data", "n_com": "Com imaturos (campo)",
+                     "n_amostras": "Amostras registradas"}), hide_index=True, use_container_width=True)
+
+if codigos_visita_sem_cadastro:
+    st.warning(f"⚠️ {len(codigos_visita_sem_cadastro)} código(s) de visita não estão no cadastro "
+               f"(local criado com os dados da própria visita): {', '.join(codigos_visita_sem_cadastro)}")
+
+st.markdown("---")
+
+# 3.1 ACOMPANHAMENTO MENSAL
+st.markdown("### 📅 Acompanhamento Mensal")
+df_ult = (df_visitas_todas.dropna(subset=["data_visita"]).groupby("id_local")["data_visita"].max().reset_index())
+if not df_ult.empty:
+    df_ult["Dias sem visita"] = (HOJE - df_ult["data_visita"]).dt.days
+    df_ult = df_ult.merge(df_locais_todos[["id_local", "bairro"]], on="id_local", how="left")
+    df_atras = df_ult[df_ult["Dias sem visita"] > PRAZO_VISITA_DIAS].sort_values("Dias sem visita", ascending=False)
+    k1, k2 = st.columns(2)
+    k1.metric("Locais acompanhados", len(df_ult))
+    k2.metric(f"Visitas em atraso (> {PRAZO_VISITA_DIAS} dias)", len(df_atras))
+    if not df_atras.empty:
+        df_atras = df_atras.assign(**{"Última visita": df_atras["data_visita"].dt.strftime("%d/%m/%Y")})
+        st.dataframe(df_atras[["id_local", "bairro", "Última visita", "Dias sem visita"]].rename(
+            columns={"id_local": "Local", "bairro": "Bairro"}), hide_index=True, use_container_width=True)
+    else:
+        st.success("✅ Todos os locais foram visitados dentro do prazo.")
+else:
+    st.info("Ainda não há visitas registradas.")
+
 st.markdown("---")
 
 # 4. MAPAS E TERMÔMETRO
@@ -423,42 +577,37 @@ df_mapa = df_final.dropna(subset=["lat", "lon"])
 if not df_mapa.empty:
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
-    tab1, tab2, tab3, tab4 = st.tabs(["📍 Mapa Base", "🔥 Mapa de Calor", "🌐 Clusters", "🏘️ Risco por Bairro"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📍 Mapa Base", "🔥 Mapa de Calor", "🌐 Locais", "🏘️ Risco por Bairro"])
 
     with tab1:
         col_mapa, col_termo = st.columns([3, 1])
         with col_mapa:
             m1 = folium.Map(location=[centro_lat, centro_lon], zoom_start=16, tiles="OpenStreetMap")
-            # Um marcador por coordenada: várias plantas no mesmo ponto não escondem uma positiva
-            for (lat_l, lon_l), grupo in df_mapa.groupby(["lat", "lon"]):
-                if (grupo["status"] == "Positivo").any():
-                    status_local = "Positivo"
-                elif (grupo["status"] == "Negativo").any():
-                    status_local = "Negativo"
-                else:
-                    status_local = "Sem análise"
-                if status_local == "Positivo":
-                    folium.Circle(location=[lat_l, lon_l], radius=100, color=STATUS_CORES["Positivo"],
+            for _, row in df_mapa.iterrows():
+                if row["positivo"]:
+                    folium.Circle(location=[row["lat"], row["lon"]], radius=100, color=STATUS_CORES["Positivo"],
                                   fill=True, fill_opacity=0.2, weight=2).add_to(m1)
-                linhas = "<br>".join(f"{r['id_bromelia']}: {r['status']}" for _, r in grupo.iterrows())
-                folium.Marker(location=[lat_l, lon_l],
-                              icon=folium.Icon(color=STATUS_ICONES[status_local], icon="info-sign"),
-                              popup=folium.Popup(f"<b>{len(grupo)} planta(s)</b><br>{linhas}", max_width=320)
-                              ).add_to(m1)
+                popup = (f"<b>{row['id_local']}</b> — {row['status'].upper()}<br>"
+                         f"Bromélias examinadas: {int(row['n_exam'])}<br>"
+                         f"Com imaturos: {int(row['n_com'])} | positivas: {int(row['positivas'])}")
+                folium.Marker(location=[row["lat"], row["lon"]],
+                              icon=folium.Icon(color=STATUS_ICONES[row["status"]], icon="info-sign"),
+                              popup=folium.Popup(popup, max_width=320)).add_to(m1)
             st_folium(m1, width=None, height=450, key="mapa1")
         with col_termo:
             st.markdown("#### 🌡️ Termômetro")
             fig_termo = go.Figure(go.Indicator(
                 mode="gauge+number", value=positividade, number={"suffix": "%"}, title={"text": nivel},
                 gauge={"axis": {"range": [0, 100]}, "bar": {"color": cor},
-                       "steps": [{"range": [0, 15], "color": "#D6EAF8"},
-                                 {"range": [15, 40], "color": "#FDEBD0"},
-                                 {"range": [40, 100], "color": "#FADBD8"}]}))
+                       "steps": [{"range": [0, RISCO_MEDIO], "color": "#D6EAF8"},
+                                 {"range": [RISCO_MEDIO, RISCO_ALTO], "color": "#FDEBD0"},
+                                 {"range": [RISCO_ALTO, 100], "color": "#FADBD8"}]}))
             fig_termo.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(fig_termo, use_container_width=True)
+            st.caption("% de locais positivos")
 
     with tab2:
-        st.markdown(f"#### 🔥 Mapa de Calor ({criterio_nome}: espécimes)")
+        st.markdown(f"#### 🔥 Mapa de Calor ({criterio_nome}: espécimes por local)")
         df_calor = df_mapa[df_mapa["positivo"]]
         if not df_calor.empty:
             fig_mapa_calor = px.density_mapbox(
@@ -468,31 +617,32 @@ if not df_mapa.empty:
             fig_mapa_calor.add_scattermapbox(
                 lat=df_calor["lat"], lon=df_calor["lon"], mode="markers",
                 marker=dict(size=12, color="#E63946"), showlegend=False,
-                hovertext=df_calor["id_bromelia"], hoverinfo="text")
+                hovertext=df_calor["id_local"], hoverinfo="text")
             fig_mapa_calor.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False)
             st.plotly_chart(fig_mapa_calor, use_container_width=True)
         else:
-            st.info(f"✅ Nenhuma planta positiva para {criterio_nome} no período.")
+            st.info(f"✅ Nenhum local positivo para {criterio_nome} no período.")
 
     with tab3:
-        df_agrupado = df_mapa.groupby(["lat", "lon", "status"]).size().reset_index(name="quantidade")
-        fig_cluster = px.scatter_mapbox(
-            df_agrupado, lat="lat", lon="lon", size="quantidade", color="status",
-            color_discrete_map=STATUS_CORES, center=dict(lat=centro_lat, lon=centro_lon),
-            zoom=15, mapbox_style="open-street-map", size_max=40)
-        fig_cluster.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, legend_title_text="Status")
-        st.plotly_chart(fig_cluster, use_container_width=True)
+        st.markdown("#### Locais (tamanho = bromélias examinadas)")
+        df_bolhas = df_mapa.assign(tamanho=df_mapa["n_exam"].clip(lower=1))
+        fig_loc = px.scatter_mapbox(
+            df_bolhas, lat="lat", lon="lon", size="tamanho", color="status", color_discrete_map=STATUS_CORES,
+            hover_name="id_local", hover_data={"bairro": True, "n_exam": True, "n_com": True, "positivas": True,
+                                               "tamanho": False, "lat": False, "lon": False},
+            center=dict(lat=centro_lat, lon=centro_lon), zoom=14, mapbox_style="open-street-map", size_max=40)
+        fig_loc.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, legend_title_text="Status")
+        st.plotly_chart(fig_loc, use_container_width=True)
 
     with tab4:
         df_bairro = df_mapa.groupby("bairro").agg(
-            lat=("lat", "mean"), lon=("lon", "mean"), plantas=("id_bromelia", "count"),
-            analisadas=("analisada", "sum"), positivas=("positivo", "sum")).reset_index()
-        df_bairro["% risco"] = (df_bairro["positivas"] / df_bairro["analisadas"].where(df_bairro["analisadas"] > 0)
-                                * 100).round(1).fillna(0)
+            lat=("lat", "mean"), lon=("lon", "mean"), locais=("id_local", "count"),
+            com_resultado=("resolvido", "sum"), positivos=("positivo", "sum")).reset_index()
+        df_bairro["% risco"] = pct(df_bairro["positivos"], df_bairro["com_resultado"]).fillna(0)
         fig_bairro = px.scatter_mapbox(
-            df_bairro, lat="lat", lon="lon", size="plantas", color="% risco",
+            df_bairro, lat="lat", lon="lon", size="locais", color="% risco",
             color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], hover_name="bairro",
-            hover_data=["analisadas", "positivas"], center=dict(lat=centro_lat, lon=centro_lon),
+            hover_data=["com_resultado", "positivos"], center=dict(lat=centro_lat, lon=centro_lon),
             zoom=13, mapbox_style="open-street-map", size_max=50)
         fig_bairro.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
         st.plotly_chart(fig_bairro, use_container_width=True)
@@ -503,10 +653,12 @@ st.markdown("### 📈 Série Temporal de Coletas")
 df_serie = df_visitas.dropna(subset=["data_visita"]).copy()
 if not df_serie.empty:
     df_serie["mes"] = df_serie["data_visita"].dt.to_period("M").astype(str)
-    contagem = df_serie.groupby("mes").agg(visitas=("id_visita", "count")).reset_index()
+    contagem = df_serie.groupby("mes").agg(visitas=("id_visita", "count"), bromelias=("n_exam", "sum")).reset_index()
     fig = go.Figure()
     fig.add_trace(go.Bar(x=contagem["mes"], y=contagem["visitas"], name="Visitas", marker_color="#2E86AB"))
-    fig.update_layout(height=350, margin=dict(l=10, r=10, t=30, b=10))
+    fig.add_trace(go.Bar(x=contagem["mes"], y=contagem["bromelias"], name="Bromélias examinadas",
+                         marker_color="#7BC8A4"))
+    fig.update_layout(barmode="group", height=350, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
 # 6. ESPÉCIES E ECOLOGIA
@@ -520,31 +672,30 @@ with col_esp:
         st.plotly_chart(px.bar(df_chart, x="especie", y="qtd_especimes", text="qtd_especimes", color="especie"),
                         use_container_width=True)
 with col_eco:
-    st.markdown(f"### 🔬 pH × presença de {criterio_nome}")
-    # Positividade por VISITA: positiva se alguma amostra analisada daquela visita for positiva
-    df_vis_res = df_am[df_am["analisada"]].groupby("id_visita").agg(positiva=("positiva", "any")).reset_index()
-    df_ph = df_visitas.merge(df_vis_res, on="id_visita", how="inner").dropna(subset=["ph"])
+    st.markdown(f"### 🔬 pH: {criterio_nome} × outros imaturos")
+    st.caption("A água só é medida em bromélias com imaturos; a comparação é entre espécies, não com água sem larvas.")
+    df_ph = df_am[df_am["analisada"]].dropna(subset=["ph"]).copy()
     if not df_ph.empty:
-        df_ph["Resultado"] = df_ph["positiva"].map({True: "Positiva", False: "Negativa"})
+        df_ph["Resultado"] = df_ph["positiva"].map({True: "Espécie-alvo", False: "Outros imaturos"})
         st.plotly_chart(px.box(df_ph, x="Resultado", y="ph", points="all", color="Resultado",
-                               color_discrete_map={"Positiva": "#E63946", "Negativa": "#2E86AB"}),
+                               color_discrete_map={"Espécie-alvo": "#E63946", "Outros imaturos": "#2E86AB"}),
                         use_container_width=True)
     else:
-        st.info("Sem visitas com pH e amostra analisada.")
+        st.info("Sem amostras analisadas com pH registrado.")
 
 # 7. TIPOLOGIA
 st.markdown("---")
 st.markdown("### 🏠 Análise por Tipologia de Imóvel")
 df_tipo = df_final.groupby("tipologia").agg(
-    Analisadas=("analisada", "sum"), Positivas=("positivo", "sum")).reset_index()
-df_tipo["% Positividade"] = (df_tipo["Positivas"] / df_tipo["Analisadas"].where(df_tipo["Analisadas"] > 0) * 100).round(1)
-df_plot = pd.melt(df_tipo, id_vars=["tipologia"], value_vars=["Positivas", "Analisadas"],
+    Com_resultado=("resolvido", "sum"), Positivos=("positivo", "sum")).reset_index()
+df_tipo["% Positividade"] = pct(df_tipo["Positivos"], df_tipo["Com_resultado"])
+df_plot = pd.melt(df_tipo, id_vars=["tipologia"], value_vars=["Positivos", "Com_resultado"],
                   var_name="Status", value_name="Quantidade")
 fig_tipo = px.bar(df_plot, x="tipologia", y="Quantidade", color="Status", barmode="group", text="Quantidade",
-                  color_discrete_map={"Positivas": "#E63946", "Analisadas": "#2E86AB"})
+                  color_discrete_map={"Positivos": "#E63946", "Com_resultado": "#2E86AB"})
 for _, row in df_tipo.iterrows():
-    pct = f"{row['% Positividade']}%" if pd.notna(row["% Positividade"]) else "—"
-    fig_tipo.add_annotation(x=row["tipologia"], y=row["Analisadas"] + 0.5, text=pct, showarrow=False,
+    texto = f"{row['% Positividade']}%" if pd.notna(row["% Positividade"]) else "—"
+    fig_tipo.add_annotation(x=row["tipologia"], y=row["Com_resultado"] + 0.5, text=texto, showarrow=False,
                             font=dict(color="#E63946", size=14))
 fig_tipo.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
 st.plotly_chart(fig_tipo, use_container_width=True)
@@ -563,9 +714,8 @@ with col_tab1:
                      hide_index=True, use_container_width=True)
 with col_tab2:
     st.markdown("#### 📈 Estatística Descritiva (Variáveis Ambientais)")
-    if not df_visitas.empty:
-        variaveis = {"pH da Água": df_visitas["ph"], "Temperatura (°C)": df_visitas["temp"],
-                     "Volume (mL)": df_visitas["vol"]}
+    if not df_am.empty:
+        variaveis = {"pH da Água": df_am["ph"], "Temperatura (°C)": df_am["temp"], "Volume (mL)": df_am["vol"]}
         stats = []
         for nome, serie in variaveis.items():
             dados = serie.dropna()
@@ -582,25 +732,28 @@ st.markdown("---")
 st.markdown("### 📈 Análise de Sazonalidade e Ranking de Bairros")
 col_saz, col_rank = st.columns([2, 1])
 with col_saz:
-    st.markdown(f"#### Positividade de {criterio_nome} por Mês")
-    # Por mês da COLETA: plantas positivas ÷ plantas analisadas naquele mês
-    df_an = df_am[df_am["analisada"]].dropna(subset=["data_visita"]).copy()
-    if not df_an.empty:
-        df_an["mes"] = df_an["data_visita"].dt.to_period("M").astype(str)
-        df_saz = df_an.groupby("mes").agg(
-            Plantas_analisadas=("id_bromelia", "nunique"), Amostras=("codigo_amostra", "count")).reset_index()
-        pos_mes = (df_an[df_an["positiva"]].groupby("mes")["id_bromelia"].nunique()
-                   .rename("Plantas_positivas").reset_index())
-        df_saz = df_saz.merge(pos_mes, on="mes", how="left").fillna({"Plantas_positivas": 0})
-        df_saz["%"] = (df_saz["Plantas_positivas"] / df_saz["Plantas_analisadas"] * 100).round(1)
+    st.markdown(f"#### Positividade de bromélias ({criterio_nome}) por Mês")
+    df_v = df_visitas.dropna(subset=["data_visita"]).copy()
+    df_a = df_am.dropna(subset=["data_visita"]).copy()
+    if not df_v.empty:
+        df_v["mes"] = df_v["data_visita"].dt.to_period("M").astype(str)
+        df_a["mes"] = df_a["data_visita"].dt.to_period("M").astype(str)
+        exam_mes = df_v.groupby("mes")["n_exam"].sum()
+        pos_mes = df_a[df_a["positiva"]].groupby("mes").size().rename("Positivas")
+        sem_mes = df_a[df_a["pendente"] | df_a["inconclusiva"]].groupby("mes").size().rename("Sem_resultado")
+        df_saz = pd.DataFrame({"Examinadas": exam_mes}).join(pos_mes).join(sem_mes).fillna(0).reset_index()
+        df_saz["Base"] = df_saz["Examinadas"] - df_saz["Sem_resultado"]
+        df_saz["%"] = pct(df_saz["Positivas"], df_saz["Base"])
         st.plotly_chart(px.line(df_saz, x="mes", y="%", markers=True,
-                                hover_data=["Plantas_analisadas", "Plantas_positivas", "Amostras"],
-                                title="% de plantas analisadas que foram positivas, por mês de coleta"),
+                                hover_data=["Examinadas", "Positivas", "Sem_resultado"],
+                                title="% de bromélias examinadas que tinham a espécie-alvo, por mês de coleta"),
                         use_container_width=True)
-    else:
-        st.info("Sem amostras analisadas no período.")
 with col_rank:
     st.markdown("#### 🏘️ Ranking de Bairros (Maior Risco)")
-    st.caption("% Risco = plantas positivas ÷ plantas analisadas.")
-    st.dataframe(df_rank.sort_values(by="% Risco", ascending=False, na_position="last"),
-                 hide_index=True, use_container_width=True)
+    st.caption("% de locais positivos = locais positivos ÷ locais com resultado.")
+    st.dataframe(
+        df_rank.drop(columns=["Pendentes", "Inconclusivas"]).rename(columns={
+            "bairro": "Bairro", "Com_resultado": "Com resultado", "Locais_positivos": "Locais positivos",
+            "Bromelias": "Bromélias", "Positivas": "Bromélias positivas"}
+        ).sort_values(by="% Locais positivos", ascending=False, na_position="last"),
+        hide_index=True, use_container_width=True)
