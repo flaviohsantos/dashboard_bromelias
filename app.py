@@ -56,8 +56,6 @@ CRITERIOS = {
     "Aedes albopictus": lambda s: "albopictus" in s,
     "Qualquer Aedes": lambda s: "aedes" in s or "aegypti" in s or "albopictus" in s,
 }
-# ═══ ALTERADO: STATUS_CORES agora vem do tema (função cores_status) ═══
-# STATUS_CORES = {...}  # removido — agora é dinâmico
 STATUS_ICONES = {"Positivo": "red", "Negativo": "blue", "Sem análise": "gray"}
 
 
@@ -161,7 +159,6 @@ if not check_password():
 # ═══ NOVO: THEME SWITCHER (sidebar) ═══
 # ═══════════════════════════════════════════════════════════════════════════
 st.sidebar.header("🎨 Aparência")
-# Rótulos amigáveis (dict tema → label)
 opcoes_tema = {k: v["label"] for k, v in TEMAS.items()}
 tema_nome = st.sidebar.selectbox(
     "Design system",
@@ -172,7 +169,6 @@ tema_nome = st.sidebar.selectbox(
 )
 st.sidebar.caption(TEMAS[tema_nome]["descricao"])
 
-# Dark mode só faz sentido no Data-Dense (os outros 2 são light-only)
 dark = False
 if tema_nome == "Data-Dense Dashboard":
     dark = st.sidebar.toggle("🌙 Modo escuro", value=False,
@@ -180,15 +176,13 @@ if tema_nome == "Data-Dense Dashboard":
 else:
     st.sidebar.caption("🌙 Modo escuro indisponível neste tema (light-only).")
 
-# Injeta o CSS do tema escolhido (sobrescreve o config.toml)
 st.markdown(css_do_tema(tema_nome, dark=dark), unsafe_allow_html=True)
 
-# ═══ NOVO: tokens derivados do tema, usados no resto do app ═══
 STATUS_CORES = cores_status(tema_nome, dark=dark)
 PLOTLY_LAYOUT = tokens_plotly(tema_nome, dark=dark)
 FOLIUM_TILES = tiles_folium(tema_nome, dark=dark)
 
-# ═══ NOVO: helper para aplicar layout Plotly padronizado ═══
+
 def _aplicar_layout(fig, height=350, margin=None):
     """Aplica tokens do tema a qualquer figura Plotly."""
     if margin is None:
@@ -211,12 +205,11 @@ st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
 if st.sidebar.button("🔄 Atualizar dados agora"):
     st.cache_data.clear()
     st.rerun()
-# ═══ ALTERADO: emojis removidos dos títulos (DESIGN.md proíbe) ═══
 st.title("Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.caption(f"Pesquisador: Flávio Santos (IOC - Fiocruz) | Atualizado em: {AGORA.strftime('%d/%m/%Y %H:%M')}")
 st.markdown("---")
 
-# --- CARREGAMENTO --- (idêntico ao original)
+# --- CARREGAMENTO ---
 base_url = _get_secret("KOBO_URL", "https://kf.kobotoolbox.org")
 token = _get_secret("KOBO_TOKEN")
 uid_campo = _get_secret("UID_CAMPO")
@@ -236,7 +229,7 @@ if not lista_campo:
     st.warning("Nenhum dado encontrado.")
     st.stop()
 
-# --- PROCESSAMENTO: CAMPO --- (idêntico ao original)
+# --- PROCESSAMENTO: CAMPO ---
 locais, visitas_list, amostras = [], [], []
 
 for indice, item in enumerate(lista_campo):
@@ -283,7 +276,7 @@ for indice, item in enumerate(lista_campo):
                     "porte": a.get("rep_visitas/rep_amostras/porte") or "N/I",
                 })
 
-# --- PROCESSAMENTO: VISITAS PERIÓDICAS --- (idêntico ao original)
+# --- PROCESSAMENTO: VISITAS PERIÓDICAS ---
 locais_via_visita = {}
 for indice, item in enumerate(lista_visita):
     id_local = normalizar_codigo(item.get("grp_identificacao/id_bromelia_visita") or "")
@@ -311,4 +304,81 @@ for indice, item in enumerate(lista_visita):
                 "id_visita": id_visita, "id_local": id_local, "codigo_amostra": normalizar_codigo(cod),
                 "data_visita": data_v,
                 "ph": a.get("rep_amostras/ph_agua"),
-               
+                "temp": a.get("rep_amostras/temp_agua_c"),
+                "vol": a.get("rep_amostras/volume_agua_ml"),
+                "genero": a.get("rep_amostras/genero") or "N/I",
+                "porte": a.get("rep_amostras/porte") or "N/I",
+            })
+
+COLS_AM = ["id_visita", "id_local", "codigo_amostra", "data_visita", "ph", "temp", "vol", "genero", "porte"]
+df_locais_bruto = pd.DataFrame(locais, columns=["id_local", "bairro", "tipologia", "lat", "lon"])
+codigos_visita_sem_cadastro = sorted(set(locais_via_visita) - set(df_locais_bruto["id_local"]))
+if codigos_visita_sem_cadastro:
+    df_extra = pd.DataFrame([{"id_local": c, "bairro": locais_via_visita[c]["bairro"], "tipologia": "N/I",
+                              "lat": locais_via_visita[c]["lat"], "lon": locais_via_visita[c]["lon"]}
+                             for c in codigos_visita_sem_cadastro])
+    df_locais_bruto = pd.concat([df_locais_bruto, df_extra], ignore_index=True)
+df_amostras_bruto = pd.DataFrame(amostras, columns=COLS_AM)
+
+ids_locais_duplicados = sorted(df_locais_bruto.loc[df_locais_bruto["id_local"].duplicated(), "id_local"].unique())
+codigos_campo_duplicados = sorted(
+    df_amostras_bruto.loc[df_amostras_bruto["codigo_amostra"].duplicated(), "codigo_amostra"].unique())
+
+df_locais = df_locais_bruto.drop_duplicates(subset=["id_local"])
+df_amostras = df_amostras_bruto.drop_duplicates(subset=["codigo_amostra"])
+df_visitas = pd.DataFrame(visitas_list, columns=["id_visita", "id_local", "data_visita", "n_exam", "n_secas", "n_agua_sem"])
+
+for col in ["n_exam", "n_secas", "n_agua_sem"]:
+    df_visitas[col] = df_visitas[col].apply(numero_inteiro).astype(int)
+df_visitas["n_com"] = (df_visitas["n_exam"] - df_visitas["n_secas"] - df_visitas["n_agua_sem"]).clip(lower=0)
+
+df_visitas["data_visita"] = pd.to_datetime(df_visitas["data_visita"], errors="coerce")
+df_amostras["data_visita"] = pd.to_datetime(df_amostras["data_visita"], errors="coerce")
+for col in ["ph", "temp", "vol"]:
+    df_amostras[col] = para_numero(df_amostras[col])
+
+# --- PROCESSAMENTO: LABORATÓRIO ---
+lab_por_codigo = {}
+codigos_lab_duplicados = set()
+for item in sorted(lista_lab, key=lambda i: i.get("_submission_time") or ""):
+    cod_lab = item.get("grp_amostra/codigo_amostra")
+    if not cod_lab or not str(cod_lab).strip():
+        continue
+    cod_lab = normalizar_codigo(cod_lab)
+    if cod_lab in lab_por_codigo:
+        codigos_lab_duplicados.add(cod_lab)
+    lab_por_codigo[cod_lab] = item
+
+codigos_lab = set(lab_por_codigo)
+lab_especies = []
+resultados_lab = {}
+for cod_lab, item in lab_por_codigo.items():
+    res_linhas = []
+    for e in item.get("rep_especies", []) or []:
+        especie = e.get("rep_especies/especie_identificada") or "nao_identificado"
+        qtd = (numero_inteiro(e.get("rep_especies/qtd_larvas")) + numero_inteiro(e.get("rep_especies/qtd_pupas"))
+               + numero_inteiro(e.get("rep_especies/qtd_adultos")))
+        res = normalizar_texto(e.get("rep_especies/resultado_amostra"))
+        if res:
+            res_linhas.append(res)
+        lab_especies.append({"codigo_amostra": cod_lab,
+                             "especie": normalizar_texto(especie).replace(" ", "_"),
+                             "qtd_especimes": qtd})
+    res_geral = normalizar_texto(item.get("grp_resultado/resultado_amostra"))
+    if not res_geral and res_linhas:
+        res_geral = ("inconclusivo" if "inconclusivo" in res_linhas
+                     else "positivo" if "positivo" in res_linhas else "negativo")
+    resultados_lab[cod_lab] = res_geral
+
+df_lab = pd.DataFrame(lab_especies, columns=["codigo_amostra", "especie", "qtd_especimes"])
+
+df_amostras_todas = df_amostras.copy()
+codigos_lab_orfaos = sorted(codigos_lab - set(df_amostras["codigo_amostra"]))
+
+df_visitas_todas = df_visitas.copy()
+df_locais_todos = df_locais.copy()
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FIM DA PARTE 1 — a PARTE 2 continua exatamente daqui:
+# "# --- BARRA LATERAL: CRITÉRIO E FILTRO DE DATA ---"
+# ═══════════════════════════════════════════════════════════════════════════
