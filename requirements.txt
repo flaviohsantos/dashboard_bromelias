@@ -1,8 +1,8 @@
-streamlit==1.38.0
-pandas==2.2.2
-requests==2.32.3
-plotly==5.24.0
-folium==0.17.0
-streamlit-folium==0.20.0
-openpyxl==3.1.5
-rich==13.9.4
+streamlit>=1.40
+pandas>=2.0
+plotly>=5.24,<7
+folium>=0.15
+streamlit-folium>=0.20
+streamlit-autorefresh>=1.0
+requests>=2.31
+tzdata
