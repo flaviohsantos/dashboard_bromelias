@@ -27,7 +27,10 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import requests
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
+try:
+    from streamlit_autorefresh import st_autorefresh
+except ImportError:   # recarga automática é opcional
+    st_autorefresh = None
 from streamlit_folium import st_folium
 
 # set_page_config precisa ser o primeiro comando Streamlit
@@ -264,7 +267,8 @@ def locais_positivos_por_criterio(df_lab, df_amostras):
 if not check_password():
     st.stop()
 
-st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
+if st_autorefresh is not None:
+    st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
 if st.sidebar.button("Atualizar dados agora"):
     st.cache_data.clear()
     st.rerun()
