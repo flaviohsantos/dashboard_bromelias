@@ -1,0 +1,13 @@
+[theme]
+# Tema base (será sobrescrito pelo CSS dinâmico do theme switcher)
+primaryColor = "#22C55E"
+backgroundColor = "#F5F5F5"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#333333"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
