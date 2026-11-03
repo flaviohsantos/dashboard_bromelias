@@ -416,4 +416,18 @@ with col_saz:
         df_saz["Base"] = df_saz["Examinadas"] - df_saz["Sem_resultado"]
         df_saz["%"] = pct(df_saz["Positivas"], df_saz["Base"])
         fig_saz = px.line(df_saz, x="mes", y="%", markers=True,
-                          hover_data=["Examin
+                          hover_data=["Examinadas", "Positivas", "Sem_resultado"],
+                          title="% de bromélias examinadas que tinham a espécie-alvo, por mês de coleta"),
+                        use_container_width=True, theme=None)
+        _aplicar_layout(fig_saz, height=350)
+        st.plotly_chart(fig_saz, use_container_width=True, theme=None)
+
+with col_rank:
+    st.markdown("#### Ranking de Bairros (Maior Risco)")
+    st.caption("% de locais positivos = locais positivos ÷ locais com resultado.")
+    st.dataframe(
+        df_rank.drop(columns=["Pendentes", "Inconclusivas"]).rename(columns={
+            "bairro": "Bairro", "Com_resultado": "Com resultado", "Locais_positivos": "Locais positivos",
+            "Bromelias": "Bromélias", "Positivas": "Bromélias positivas"}
+        ).sort_values(by="% Locais positivos", ascending=False, na_position="last"),
+        hide_index=True, use_container_width=True)
