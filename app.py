@@ -10,7 +10,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 from streamlit_folium import st_folium
 
 from themes import TEMAS, TEMA_PADRAO, css_do_tema, tokens_plotly, tiles_folium, cores_status
@@ -70,7 +69,15 @@ def _aplicar_layout(fig, height=350, margin=None):
     return fig
 
 # --- CARREGAMENTO ---
-st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
+# ═══ NOVO: Auto-refresh nativo (substitui o streamlit_autorefresh) ═══
+@st.fragment(run_every=300)  # 300 segundos = 5 minutos
+def auto_refresh():
+    # Este fragmento roda a cada 5 minutos e força o recarregamento dos dados
+    st.cache_data.clear()
+    st.rerun()
+
+# Chama a função para ativar o timer
+auto_refresh()
 if st.sidebar.button("🔄 Atualizar dados agora"): st.cache_data.clear(); st.rerun()
 st.title("Dashboard — Bromélias Ornamentais Urbanas e Culicídeos")
 st.caption(f"Pesquisador: Flávio Santos (IOC - Fiocruz) | Atualizado em: {AGORA.strftime('%d/%m/%Y %H:%M')}")
