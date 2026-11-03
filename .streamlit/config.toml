@@ -1,13 +1,9 @@
+# Colocar no repositório em:  .streamlit/config.toml
+# Tokens do modelo "Data-Dense Dashboard": fundo #F5F5F5, superfície branca, texto #333333.
 [theme]
-# Tema base (será sobrescrito pelo CSS dinâmico do theme switcher)
-primaryColor = "#22C55E"
+base = "light"
+primaryColor = "#333333"
 backgroundColor = "#F5F5F5"
 secondaryBackgroundColor = "#FFFFFF"
 textColor = "#333333"
 font = "sans serif"
-
-[server]
-headless = true
-
-[browser]
-gatherUsageStats = false
