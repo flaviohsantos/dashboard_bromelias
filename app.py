@@ -207,7 +207,10 @@ def baixar_formulario(uid, token, base_url):
         return []
     url = f"{base_url}/api/v2/assets/{uid}/data/"
     headers = {"Authorization": f"Token {token}"}
-    params = {"format": "json"}
+    params = {
+    "format": "json",
+    "query": '{"$or": [{"_submitted_by": {"$exists": true}}]}' # Traz apenas o necessário
+}
     registros = []
     while url:
         r = requests.get(url, headers=headers, params=params, timeout=60)
@@ -282,6 +285,14 @@ token = _get_secret("KOBO_TOKEN")
 uid_campo = _get_secret("UID_CAMPO")
 uid_lab = _get_secret("UID_LAB")
 uid_visita = _get_secret("UID_VISITA")   # projeto de visita periódica (opcional)
+
+# --- NOVO: Evita travar a página inicial ---
+if "dados_carregados" not in st.session_state:
+    st.info("O dashboard está pronto. Clique no botão abaixo para carregar os dados do Kobo (pode levar alguns segundos).")
+    if st.button("📥 Carregar dados do Kobo"):
+        st.session_state["dados_carregados"] = True
+        st.rerun()
+    st.stop()
 
 with st.spinner("Baixando dados do Kobo..."):
     try:
