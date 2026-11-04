@@ -27,11 +27,18 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import requests
 import streamlit as st
-try:
-    from streamlit_autorefresh import st_autorefresh
-except ImportError:   # recarga automática é opcional
-    st_autorefresh = None
-from streamlit_folium import st_folium
+
+# --- NOVO: Auto-refresh nativo do Streamlit (não usa bibliotecas externas) ---
+@st.fragment(run_every=300)  # 300 segundos = 5 minutos
+def auto_refresh():
+    st.cache_data.clear()
+    st.rerun()
+
+auto_refresh()
+
+if st.sidebar.button("Atualizar dados agora"):
+    st.cache_data.clear()
+    st.rerun()
 
 # set_page_config precisa ser o primeiro comando Streamlit
 st.set_page_config(page_title="Bromélias & Culicídeos", layout="wide")
@@ -286,10 +293,10 @@ uid_campo = _get_secret("UID_CAMPO")
 uid_lab = _get_secret("UID_LAB")
 uid_visita = _get_secret("UID_VISITA")   # projeto de visita periódica (opcional)
 
-# --- NOVO: Evita travar a página inicial ---
+# --- NOVO: Botão para carregar os dados do Kobo apenas quando solicitado ---
 if "dados_carregados" not in st.session_state:
-    st.info("O dashboard está pronto. Clique no botão abaixo para carregar os dados do Kobo (pode levar alguns segundos).")
-    if st.button("📥 Carregar dados do Kobo"):
+    st.info("O dashboard está pronto. Clique no botão abaixo para carregar os dados do Kobo.")
+    if st.button("📥 Carregar dados"):
         st.session_state["dados_carregados"] = True
         st.rerun()
     st.stop()
@@ -302,10 +309,6 @@ with st.spinner("Baixando dados do Kobo..."):
     except requests.RequestException as exc:
         st.error(f"Falha ao baixar dados do Kobo: {exc}")
         st.stop()
-
-if not lista_campo:
-    st.warning("Nenhum dado encontrado.")
-    st.stop()
 
 # --- PROCESSAMENTO: CAMPO ---
 locais, visitas_list, amostras = [], [], []
