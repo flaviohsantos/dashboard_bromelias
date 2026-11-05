@@ -5,3 +5,4 @@ folium>=0.15
 streamlit-folium>=0.20
 requests>=2.31
 tzdata
+streamlit-autorefresh>=1.0
