@@ -632,8 +632,11 @@ df_mapa = df_final.dropna(subset=["lat", "lon"])
 if not df_mapa.empty:
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
-       tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📍 Mapa Base", "🔥 Mapa de Calor", "🌐 Locais", "🏘️ Risco por Bairro", "🦠 Sinan"])
+    
+    # Abas criadas corretamente indentadas dentro do if
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["📍 Mapa Base", "🔥 Mapa de Calor", "🌐 Locais", "🏘️ Risco por Bairro", "🦠 SINAN"]
+    )
 
     with tab1:
         col_mapa, col_termo = st.columns([3, 1])
@@ -702,11 +705,9 @@ if not df_mapa.empty:
             zoom=13, mapbox_style="open-street-map", size_max=50)
         fig_bairro.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
         st.plotly_chart(fig_bairro, use_container_width=True)
+
     with tab5:
-        render_sinan(df_mapa)
-    else:
-        render_sinan(df_mapa)
-        
+        render_sinan(df_mapa)   
 
 # 5. SÉRIE TEMPORAL
 st.markdown("---")
