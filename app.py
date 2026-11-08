@@ -16,6 +16,8 @@ import unicodedata
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from pathlib import Path
+from folium.plugins import HeatMap
 import folium
 import pandas as pd
 import plotly.express as px
@@ -140,6 +142,59 @@ def locais_positivos_por_criterio(df_lab, df_amostras):
         out[nome] = int(df_amostras.loc[df_amostras["codigo_amostra"].isin(cods), "id_local"].nunique())
     return out
 
+ARQUIVO_SINAN = Path(__file__).parent / "coordenadas_sinan.csv"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_sinan(caminho=ARQUIVO_SINAN):
+    """Lê as coordenadas do Sinan. Nunca derruba o app: em caso de erro devolve DataFrame vazio."""
+    try:
+        df = pd.read_csv(caminho, sep=None, engine="python", encoding="utf-8-sig", dtype=str)
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        col_lat = next(c for c in df.columns if c.startswith("lat"))
+        col_lon = next(c for c in df.columns if c.startswith("lon"))
+        out = pd.DataFrame({
+            "lat": pd.to_numeric(df[col_lat].str.replace(",", ".", regex=False), errors="coerce"),
+            "lon": pd.to_numeric(df[col_lon].str.replace(",", ".", regex=False), errors="coerce"),
+        }).dropna()
+        out = out[out["lat"].between(-90, 90) & out["lon"].between(-180, 180)]
+        return out.reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame(columns=["lat", "lon"])
+
+
+def mapa_sinan(df_sinan, df_locais_mapa=None, calor=False, mostrar_locais=False):
+    m = folium.Map(location=[df_sinan["lat"].mean(), df_sinan["lon"].mean()], zoom_start=13,
+                   tiles="OpenStreetMap")
+    if calor:
+        HeatMap(df_sinan[["lat", "lon"]].values.tolist(), radius=25, blur=18).add_to(m)
+    else:
+        for i, r in df_sinan.iterrows():
+            folium.CircleMarker([r["lat"], r["lon"]], radius=6, color="#7B1FA2", weight=2, fill=True,
+                                fill_color="#9C27B0", fill_opacity=0.7,
+                                tooltip=f"Notificação {i + 1}").add_to(m)
+    if mostrar_locais and df_locais_mapa is not None and not df_locais_mapa.empty:
+        for _, r in df_locais_mapa.iterrows():
+            folium.CircleMarker([r["lat"], r["lon"]], radius=4, color=STATUS_CORES.get(r["status"], "#9E9E9E"),
+                                fill=True, fill_opacity=0.9,
+                                tooltip=f"{r['id_local']} — {r['status']}").add_to(m)
+    m.fit_bounds([[df_sinan["lat"].min(), df_sinan["lon"].min()],
+                  [df_sinan["lat"].max(), df_sinan["lon"].max()]])
+    return m
+
+
+def render_sinan(df_locais_mapa):
+    df_sinan = carregar_sinan()
+    if df_sinan.empty:
+        st.info("coordenadas_sinan.csv não encontrado (ou sem coordenadas válidas). "
+                "O arquivo precisa estar na mesma pasta do app.py.")
+        return
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Notificações com coordenada", len(df_sinan))
+    calor = c2.checkbox("Mapa de calor", key="sinan_calor")
+    locais = c3.checkbox("Mostrar locais das bromélias", key="sinan_locais")
+    st_folium(mapa_sinan(df_sinan, df_locais_mapa, calor, locais),
+              width=None, height=450, key="mapa_sinan", returned_objects=[])
 
 # --- ACESSO ---
 if not check_password():
@@ -577,7 +632,8 @@ df_mapa = df_final.dropna(subset=["lat", "lon"])
 if not df_mapa.empty:
     centro_lat = df_mapa["lat"].mean()
     centro_lon = df_mapa["lon"].mean()
-    tab1, tab2, tab3, tab4 = st.tabs(["📍 Mapa Base", "🔥 Mapa de Calor", "🌐 Locais", "🏘️ Risco por Bairro"])
+       tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["📍 Mapa Base", "🔥 Mapa de Calor", "🌐 Locais", "🏘️ Risco por Bairro", "🦠 Sinan"])
 
     with tab1:
         col_mapa, col_termo = st.columns([3, 1])
@@ -646,6 +702,11 @@ if not df_mapa.empty:
             zoom=13, mapbox_style="open-street-map", size_max=50)
         fig_bairro.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
         st.plotly_chart(fig_bairro, use_container_width=True)
+    with tab5:
+        render_sinan(df_mapa)
+    else:
+        render_sinan(df_mapa)
+        
 
 # 5. SÉRIE TEMPORAL
 st.markdown("---")
