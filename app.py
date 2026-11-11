@@ -348,12 +348,13 @@ with st.expander("🧪 Qualidade dos dados"):
     q1, q2 = st.columns(2)
     q1.write(f"**IDs de local duplicados:** {len(ids_dup)}")
     if ids_dup: q1.write(", ".join(ids_dup))
-    q1.write(f"**Códigos de amostra duplicados:** {len(cods_dup)}")
+    q1.write(f"**Códigos de amostra duplicados (campo):** {len(cods_dup)}")
     if cods_dup: q1.write(", ".join(cods_dup))
     q2.write(f"**Códigos de laboratório repetidos:** {len(cods_lab_dup)}")
     if cods_lab_dup: q2.write(", ".join(sorted(cods_lab_dup)))
     q2.write(f"**Análises sem amostra de campo:** {len(cods_orf)}")
     if cods_orf: q2.write(", ".join(cods_orf))
+
 st.markdown("---")
 
 # --- MÉDIAS DA ÁGUA E CLIMA ---
