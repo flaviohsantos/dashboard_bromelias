@@ -398,7 +398,7 @@ with tab2:
         st.info("Nenhum positivo.")
     else:
         fig = px.density_mapbox(df_c, lat="lat", lon="lon", z="qtd_alvo", radius=50, center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map", color_continuous_scale="Inferno")
-        
+        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
 with tab3:
