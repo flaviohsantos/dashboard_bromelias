@@ -190,6 +190,9 @@ def _amostra(a, p, id_v, id_l, d):
     if not cod: return None
     return {"id_visita": id_v, "id_local": id_l, "codigo_amostra": normalizar_codigo(cod), "data_visita": d, "ph": a.get(f"{p}/ph_agua"), "temp": a.get(f"{p}/temp_agua_c"), "vol": a.get(f"{p}/volume_agua_ml"), "genero": a.get(f"{p}/genero") or "N/I", "porte": a.get(f"{p}/porte") or "N/I"}
 
+# --- NOVO: Contagem de recusas ---
+recusas = sum(1 for item in raw_campo if item.get("grp_abertura/consentimento") == "nao")
+
 for i, item in enumerate(raw_campo):
     id_l = normalizar_codigo(item.get("grp_cadastro/id_local_calc") or "") or f"SEM-{i}"
     lat, lon = parse_geo(item.get("grp_cadastro/geolocalizacao", ""))
