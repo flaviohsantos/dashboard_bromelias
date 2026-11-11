@@ -394,29 +394,34 @@ with tab1:
 
 with tab2:
     df_c = df_m[df_m["positivo"]] if not df_m.empty else df_m
-    if df_c.empty: st.info("Nenhum positivo.")
+    if df_c.empty:
+        st.info("Nenhum positivo.")
     else:
         fig = px.density_mapbox(df_c, lat="lat", lon="lon", z="qtd_alvo", radius=50, center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map", color_continuous_scale="Inferno")
-        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False); st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False)
+        st.plotly_chart(fig, use_container_width=True)
 
 with tab3:
-    if df_m.empty: st.info("Sem coordenadas.")
+    if df_m.empty:
+        st.info("Sem coordenadas.")
     else:
         fig = px.scatter_mapbox(df_m.assign(t=df_m["n_exam"].clip(lower=1)), lat="lat", lon="lon", size="t", color="status", color_discrete_map=STATUS_CORES, hover_name="id_local", center=dict(lat=clat, lon=clon), zoom=14, mapbox_style="open-street-map")
-        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450); st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450)
+        st.plotly_chart(fig, use_container_width=True)
 
 with tab4:
-    if df_m.empty: st.info("Sem coordenadas.")
+    if df_m.empty:
+        st.info("Sem coordenadas.")
     else:
         df_b = df_m.groupby("bairro").agg(lat=("lat", "mean"), lon=("lon", "mean"), locais=("id_local", "count"), com_res=("resolvido", "sum"), pos=("positivo", "sum")).reset_index()
         df_b["%"] = pct(df_b["pos"], df_b["com_res"]).fillna(0)
         fig = px.scatter_mapbox(df_b, lat="lat", lon="lon", size="locais", color="%", color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], hover_name="bairro", center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map")
-        fig.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0)); st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
+        st.plotly_chart(fig, use_container_width=True)
 
 with tab5:
     render_sinan(df_m)
 
-# --- GRÁFICOS FINAIS E TABELAS ---
 st.markdown("---")
 st.markdown("### 📈 Série Temporal de Coletas")
 df_s = df_v.dropna(subset=["data_visita"]).copy()
@@ -426,8 +431,8 @@ if not df_s.empty:
     fig = go.Figure()
     fig.add_trace(go.Bar(x=serie["mes"], y=serie["visitas"], name="Visitas", marker_color="#2E86AB"))
     fig.add_trace(go.Bar(x=serie["mes"], y=serie["bromelias"], name="Bromélias", marker_color="#7BC8A4"))
-    fig.update_layout(barmode="group", height=350); st.plotly_chart(fig, use_container_width=True)
-else: st.info("Sem visitas com data.")
+    fig.update_layout(barmode="group", height=350)
+    st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
 g1, g2 = st.columns([2, 1])
@@ -442,43 +447,24 @@ with g1:
         fig = px.line(sz, x="mes", y="%", markers=True, labels={"mes": "Mês", "%": "Amostras positivas (%)"}, hover_data=["analisadas", "positivas"])
         fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10))
         st.plotly_chart(fig, use_container_width=True)
-    else: st.info("Sem amostras analisadas no período.")
 
 with g2:
     st.markdown("### 🏘️ Ranking de Bairros")
-    st.caption("% de locais positivos = locais positivos ÷ locais com resultado.")
-    df_tabela_rank = df_f.groupby("bairro").agg(
-        Locais=("id_local", "count"),
-        Com_resultado=("resolvido", "sum"),
-        Locais_positivos=("positivo", "sum"),
-        Bromelias=("n_exam", "sum"),
-        Positivas=("positivas", "sum")
-    ).reset_index()
+    df_tabela_rank = df_f.groupby("bairro").agg(Locais=("id_local", "count"), Com_resultado=("resolvido", "sum"), Locais_positivos=("positivo", "sum"), Bromelias=("n_exam", "sum"), Positivas=("positivas", "sum")).reset_index()
     df_tabela_rank["% Locais positivos"] = pct(df_tabela_rank["Locais_positivos"], df_tabela_rank["Com_resultado"])
-    
-    st.dataframe(
-        df_tabela_rank.rename(columns={
-            "bairro": "Bairro", "Com_resultado": "Com resultado", "Locais_positivos": "Locais positivos",
-            "Bromelias": "Bromélias", "Positivas": "Bromélias positivas"}
-        ).sort_values(by="% Locais positivos", ascending=False, na_position="last"),
-        hide_index=True, use_container_width=True
-    )
+    st.dataframe(df_tabela_rank.rename(columns={"bairro": "Bairro", "Com_resultado": "Com resultado", "Locais_positivos": "Locais positivos", "Bromelias": "Bromélias", "Positivas": "Bromélias positivas"}).sort_values(by="% Locais positivos", ascending=False, na_position="last"), hide_index=True, use_container_width=True)
 
 st.markdown("---")
 col_eco, col_tab = st.columns(2)
 
 with col_eco:
     st.markdown(f"### 🔬 pH: {crit_nome} × Outros Imaturos")
-    st.caption("A água só é medida em bromélias com imaturos; a comparação é entre espécies.")
     df_ph = df_am[df_am["analisada"]].dropna(subset=["ph"]).copy()
     if not df_ph.empty:
         df_ph["Resultado"] = df_ph["positiva"].map({True: "Espécie-alvo", False: "Outros imaturos"})
-        fig_ph = px.box(df_ph, x="Resultado", y="ph", points="all", color="Resultado",
-                        color_discrete_map={"Espécie-alvo": "#E63946", "Outros imaturos": "#2E86AB"})
+        fig_ph = px.box(df_ph, x="Resultado", y="ph", points="all", color="Resultado", color_discrete_map={"Espécie-alvo": "#E63946", "Outros imaturos": "#2E86AB"})
         fig_ph.update_layout(height=350, margin=dict(l=10, r=10, t=30, b=10))
         st.plotly_chart(fig_ph, use_container_width=True)
-    else:
-        st.info("Sem amostras analisadas com pH registrado.")
 
 with col_tab:
     st.markdown("### 🦟 Totais por Espécie")
@@ -486,7 +472,6 @@ with col_tab:
         df_esp = df_lab.groupby("especie").agg(Total=("qtd_especimes", "sum")).reset_index()
         df_esp["especie"] = df_esp["especie"].str.replace("_", " ").str.capitalize()
         df_esp["%"] = (df_esp["Total"] / df_esp["Total"].sum() * 100).round(1).astype(str) + "%"
-        st.dataframe(df_esp.rename(columns={"especie": "Espécie", "Total": "Espécimes"}),
-                     hide_index=True, use_container_width=True)
+        st.dataframe(df_esp.rename(columns={"especie": "Espécie", "Total": "Espécimes"}), hide_index=True, use_container_width=True)
     else:
         st.info("Sem resultados de laboratório no período.")
