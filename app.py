@@ -422,3 +422,51 @@ with tab4:
 with tab5:
     render_sinan(df_m)
 
+st.markdown("---")
+st.markdown("### 📈 Série Temporal de Coletas")
+df_s = df_v.dropna(subset=["data_visita"]).copy()
+if not df_s.empty:
+    df_s["mes"] = df_s["data_visita"].dt.to_period("M").astype(str)
+    serie = df_s.groupby("mes").agg(visitas=("id_visita", "count"), bromelias=("n_exam", "sum")).reset_index()
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=serie["mes"], y=serie["visitas"], name="Visitas", marker_color="#2E86AB"))
+    fig.add_trace(go.Bar(x=serie["mes"], y=serie["bromelias"], name="Bromélias", marker_color="#7BC8A4"))
+    fig.update_layout(barmode="group", height=350)
+    st.plotly_chart(fig, use_container_width=True)
+
+g1, g2 = st.columns([2, 1])
+
+with g1:
+    st.markdown("### 🌦️ Sazonalidade da Positividade")
+    df_sz = df_am[df_am["analisada"]].dropna(subset=["data_visita"]).copy()
+    if not df_sz.empty:
+        df_sz["mes"] = df_sz["data_visita"].dt.to_period("M").astype(str)
+        sz = df_sz.groupby("mes").agg(analisadas=("codigo_amostra", "count"), positivas=("positiva", "sum")).reset_index()
+        sz["%"] = pct(sz["positivas"], sz["analisadas"]).fillna(0)
+        fig = px.line(sz, x="mes", y="%", markers=True, labels={"mes": "Mês", "%": "Amostras positivas (%)"}, hover_data=["analisadas", "positivas"])
+        fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10))
+        st.plotly_chart(fig, use_container_width=True)
+
+with g2:
+    st.markdown("### 🏘️ Ranking de Bairros")
+    df_tabela_rank = df_f.groupby("bairro").agg(Locais=("id_local", "count"), Com_resultado=("resolvido", "sum"), Locais_positivos=("positivo", "sum"), Bromelias=("n_exam", "sum"), Positivas=("positivas", "sum")).reset_index()
+    df_tabela_rank["% Locais positivos"] = pct(df_tabela_rank["Locais_positivos"], df_tabela_rank["Com_resultado"])
+    st.dataframe(df_tabela_rank.rename(columns={"bairro": "Bairro", "Com_resultado": "Com resultado", "Locais_positivos": "Locais positivos", "Bromelias": "Bromélias", "Positivas": "Bromélias positivas"}).sort_values(by="% Locais positivos", ascending=False, na_position="last"), hide_index=True, use_container_width=True)
+
+col_eco, col_tab = st.columns(2)
+
+with col_eco:
+    st.markdown(f"### 🔬 pH: {crit_nome} × Outros Imaturos")
+    df_ph = df_am[df_am["analisada"]].dropna(subset=["ph"]).copy()
+    if not df_ph.empty:
+        df_ph["Resultado"] = df_ph["positiva"].map({True: "Espécie-alvo", False: "Outros imaturos"})
+        fig_ph = px.box(df_ph, x="Resultado", y="ph", points="all", color="Resultado", color_discrete_map={"Espécie-alvo": "#E63946", "Outros imaturos": "#2E86AB"})
+        fig_ph.update_layout(height=350, margin=dict(l=10, r=10, t=30, b=10))
+        st.plotly_chart(fig_ph, use_container_width=True)
+
+with col_tab:
+    st.markdown("### 🦟 Totais por Espécie")
+    if not df_lab.empty:
+        df_esp = df_lab.groupby("especie").agg(Total=("qtd_especimes", "sum")).reset_index()
+        df_esp["especie"] = df_esp["especie"].str.replace("_", " ").str.capitalize()
+        st.dataframe(df_esp.rename(columns={"especie": "Espécie", "Total": "Espécimes"}), hide_index=True, use_container_width=True)
