@@ -392,7 +392,31 @@ with tab1:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=pos, number={"suffix": "%"}, title={"text": niv}, gauge={"axis": {"range": [0, 100]}, "bar": {"color": cor}}))
             fig.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10)); st.plotly_chart(fig, use_container_width=True)
 
+with tab2:
+    df_c = df_m[df_m["positivo"]] if not df_m.empty else df_m
+    if not df_c.empty:
+        fig = px.density_mapbox(df_c, lat="lat", lon="lon", z="qtd_alvo", radius=50, center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map", color_continuous_scale="Inferno")
+        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Nenhum positivo.")
 
+with tab3:
+    if not df_m.empty:
+        fig = px.scatter_mapbox(df_m.assign(t=df_m["n_exam"].clip(lower=1)), lat="lat", lon="lon", size="t", color="status", color_discrete_map=STATUS_CORES, hover_name="id_local", center=dict(lat=clat, lon=clon), zoom=14, mapbox_style="open-street-map")
+        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450)
+        st.plotly_chart(fig, use_container_width=True)
+
+with tab4:
+    if not df_m.empty:
+        df_b = df_m.groupby("bairro").agg(lat=("lat", "mean"), lon=("lon", "mean"), locais=("id_local", "count"), com_res=("resolvido", "sum"), pos=("positivo", "sum")).reset_index()
+        df_b["%"] = pct(df_b["pos"], df_b["com_res"]).fillna(0)
+        fig = px.scatter_mapbox(df_b, lat="lat", lon="lon", size="locais", color="%", color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], hover_name="bairro", center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map")
+        fig.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+with tab5:
+    render_sinan(df_m)
 
 st.markdown("---")
 st.markdown("### 📈 Série Temporal de Coletas")
