@@ -330,8 +330,11 @@ else: niv, bg, cor, ico, msg = "ALTO", "#FADBD8", "#E63946", "🚨", f"Ação ur
 st.markdown("### 📊 Painel Executivo")
 col_a, col_b = st.columns([3, 2])
 with col_a:
-    a1, a2, a3 = st.columns(3); a1.metric("Locais", n_loc); a2.metric("Bromélias examinadas", n_exam); a3.metric("Com imaturos", n_com)
-    b1, b2, b3 = st.columns(3); b1.metric("Positivas", b_pos); b2.metric("Positividade", f"{pos_b:.1f}%"); b3.metric("Locais positivos", f"{n_pos}/{n_res}")
+        b1, b2, b3, b4 = st.columns(4)
+    b1.metric("Positivas", b_pos)
+    b2.metric("Positividade", f"{pos_b:.1f}%")
+    b3.metric("Locais positivos", f"{n_pos}/{n_res}")
+    b4.metric("Recusas de Visita", recusas, help="Moradores que não autorizaram a visita.")
 with col_b:
     st.markdown(f'<div class="card status-card" style="border-left:4px solid {cor};"><div class="status-label">Nível de risco</div><div class="status-value" style="color:{cor};"><span class="dot" style="background:{cor};"></span>{ico} {niv}</div><p style="margin-bottom:0; font-size:14px; color:#333;">{msg}</p></div>', unsafe_allow_html=True)
 
