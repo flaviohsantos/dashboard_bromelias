@@ -390,52 +390,38 @@ df_m = df_f.dropna(subset=["lat", "lon"])
 if not df_m.empty: clat, clon = df_m["lat"].mean(), df_m["lon"].mean()
 else: clat = clon = None
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📍 Base", "🔥 Calor", "🌐 Locais", "🏘️ Bairros", "🦠 SINAN"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📍 Base", "🔥 Calor", "🌐 Locais", "🏘️ Bairros", "🦠 SINAN"])
 
-with tab1:
-    if df_m.empty: st.info("Sem coordenadas.")
-    else:
-        col_m, col_t = st.columns([3, 1])
-        with col_m:
-            m_base = folium.Map(location=[clat, clon], zoom_start=16, tiles="OpenStreetMap")
-            for _, r in df_m.iterrows():
-                folium.Marker([r["lat"], r["lon"]], icon=folium.Icon(color=STATUS_ICONES[r["status"]]), popup=r["id_local"]).add_to(m_base)
-            st_folium(m_base, width=None, height=450, key="m1", returned_objects=[])
-        with col_t:
-            fig = go.Figure(go.Indicator(mode="gauge+number", value=pos, number={"suffix": "%"}, title={"text": niv}, gauge={"axis": {"range": [0, 100]}, "bar": {"color": cor}}))
-            fig.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10)); st.plotly_chart(fig, use_container_width=True)
+    with tab1:
+        if not df_m.empty:
+            col_m, col_t = st.columns([3, 1])
+            with col_m:
+                m_base = folium.Map(location=[clat, clon], zoom_start=16, tiles="OpenStreetMap")
+                for _, r in df_m.iterrows():
+                    folium.Marker([r["lat"], r["lon"]], icon=folium.Icon(color=STATUS_ICONES[r["status"]]), popup=r["id_local"]).add_to(m_base)
+                st_folium(m_base, width=None, height=450, key="m1", returned_objects=[])
+            with col_t:
+                fig = go.Figure(go.Indicator(mode="gauge+number", value=pos, number={"suffix": "%"}, title={"text": niv}, gauge={"axis": {"range": [0, 100]}, "bar": {"color": cor}}))
+                fig.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
+                st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        if not df_m.empty and not df_m[df_m["positivo"]].empty:
-            df_c = df_m[df_m["positivo"]]
-            st.plotly_chart(px.density_mapbox(df_c, lat="lat", lon="lon", z="qtd_alvo", radius=50, center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map", color_continuous_scale="Inferno"), use_container_width=True)
-        else:
-            st.info("Nenhum positivo.")
-
-        with tab3:
         if not df_m.empty:
-            # Criando o mapa base com os pontos (Plotly Express)
-            fig_loc = px.scatter_mapbox(
-                df_m.assign(t=df_m["n_exam"].clip(lower=1)), 
-                lat="lat", lon="lon", size="t", color="status", 
-                color_discrete_map=STATUS_CORES, hover_name="id_local", 
-                center=dict(lat=clat, lon=clon), zoom=14, 
-                mapbox_style="open-street-map"
-            )
-            
-            # Adicionando os raios de 100 metros para as bromélias POSITIVAS
+            df_c = df_m[df_m["positivo"]]
+            if not df_c.empty:
+                fig = px.density_mapbox(df_c, lat="lat", lon="lon", z="qtd_alvo", radius=50, center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map", color_continuous_scale="Inferno")
+                fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Nenhum positivo.")
+
+    with tab3:
+        if not df_m.empty:
+            fig_loc = px.scatter_mapbox(df_m.assign(t=df_m["n_exam"].clip(lower=1)), lat="lat", lon="lon", size="t", color="status", color_discrete_map=STATUS_CORES, hover_name="id_local", center=dict(lat=clat, lon=clon), zoom=14, mapbox_style="open-street-map")
             df_pos = df_m[df_m["status"] == "Positivo"]
             if not df_pos.empty:
                 for _, row in df_pos.iterrows():
-                    fig_loc.add_trace(go.Scattermapbox(
-                        lat=[row["lat"]],
-                        lon=[row["lon"]],
-                        mode="markers",
-                        marker=dict(size=100, color=STATUS_CORES["Positivo"], opacity=0.2),
-                        showlegend=False,
-                        hoverinfo="skip"
-                    ))
-            
+                    fig_loc.add_trace(go.Scattermapbox(lat=[row["lat"]], lon=[row["lon"]], mode="markers", marker=dict(size=100, color=STATUS_CORES["Positivo"], opacity=0.2), showlegend=False, hoverinfo="skip"))
             fig_loc.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450)
             st.plotly_chart(fig_loc, use_container_width=True)
 
@@ -443,7 +429,9 @@ with tab1:
         if not df_m.empty:
             df_b = df_m.groupby("bairro").agg(lat=("lat", "mean"), lon=("lon", "mean"), locais=("id_local", "count"), com_res=("resolvido", "sum"), pos=("positivo", "sum")).reset_index()
             df_b["%"] = pct(df_b["pos"], df_b["com_res"]).fillna(0)
-            st.plotly_chart(px.scatter_mapbox(df_b, lat="lat", lon="lon", size="locais", color="%", color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], hover_name="bairro", center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map"), use_container_width=True)
+            fig = px.scatter_mapbox(df_b, lat="lat", lon="lon", size="locais", color="%", color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], hover_name="bairro", center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map")
+            fig.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
+            st.plotly_chart(fig, use_container_width=True)
 
     with tab5:
         render_sinan(df_m)
