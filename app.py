@@ -412,9 +412,32 @@ with tab1:
         else:
             st.info("Nenhum positivo.")
 
-    with tab3:
+        with tab3:
         if not df_m.empty:
-            st.plotly_chart(px.scatter_mapbox(df_m.assign(t=df_m["n_exam"].clip(lower=1)), lat="lat", lon="lon", size="t", color="status", color_discrete_map=STATUS_CORES, hover_name="id_local", center=dict(lat=clat, lon=clon), zoom=14, mapbox_style="open-street-map"), use_container_width=True)
+            # Criando o mapa base com os pontos (Plotly Express)
+            fig_loc = px.scatter_mapbox(
+                df_m.assign(t=df_m["n_exam"].clip(lower=1)), 
+                lat="lat", lon="lon", size="t", color="status", 
+                color_discrete_map=STATUS_CORES, hover_name="id_local", 
+                center=dict(lat=clat, lon=clon), zoom=14, 
+                mapbox_style="open-street-map"
+            )
+            
+            # Adicionando os raios de 100 metros para as bromélias POSITIVAS
+            df_pos = df_m[df_m["status"] == "Positivo"]
+            if not df_pos.empty:
+                for _, row in df_pos.iterrows():
+                    fig_loc.add_trace(go.Scattermapbox(
+                        lat=[row["lat"]],
+                        lon=[row["lon"]],
+                        mode="markers",
+                        marker=dict(size=100, color=STATUS_CORES["Positivo"], opacity=0.2),
+                        showlegend=False,
+                        hoverinfo="skip"
+                    ))
+            
+            fig_loc.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450)
+            st.plotly_chart(fig_loc, use_container_width=True)
 
     with tab4:
         if not df_m.empty:
