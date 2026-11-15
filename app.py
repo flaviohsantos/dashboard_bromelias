@@ -378,10 +378,38 @@ st.markdown("### ⏳ Amostras Pendentes")
 if not df_am.empty:
     df_p = df_am[df_am["pendente"]].copy()
     if not df_p.empty:
+        # Calcula os dias de espera
         df_p["Dias"] = (HOJE - df_p["data_visita"]).dt.days
-        st.dataframe(df_p[["codigo_amostra", "id_local", "data_visita", "Dias"]].rename(columns={"codigo_amostra": "Código", "id_local": "Local", "data_visita": "Data"}), hide_index=True)
-    else: st.success("🎉 Todas analisadas!")
-else: st.info("Sem amostras.")
+        
+        # Cria o link dinâmico para o formulário do laboratório
+        # O Kobo aceita o pré-preenchimento via URL usando a sintaxe ?d[nome_do_campo]=valor
+        df_p["Ação"] = df_p["codigo_amostra"].apply(
+            lambda cod: f"{URL_FORMULARIO_LAB}?d[grp_amostra/codigo_amostra]={cod}"
+        )
+        
+        # Formata a data para ficar bonita
+        df_p["data_visita"] = pd.to_datetime(df_p["data_visita"]).dt.strftime("%d/%m/%Y")
+        
+        # Monta a tabela final
+        df_exibicao = df_p[["codigo_amostra", "id_local", "data_visita", "Dias", "Ação"]].rename(
+            columns={"codigo_amostra": "Código", "id_local": "Local", "data_visita": "Data"}
+        )
+        
+        # Exibe a tabela com o link clicável
+        st.dataframe(
+            df_exibicao,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Ação": st.column_config.LinkColumn(
+                    "Ação", display_text="🔬 Analisar", help="Clique para abrir o formulário de laboratório com o código preenchido."
+                )
+            }
+        )
+    else:
+        st.success("🎉 Todas analisadas!")
+else:
+    st.info("Sem amostras.")
 st.markdown("---")
 
 # --- MAPAS ---
