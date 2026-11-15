@@ -439,8 +439,20 @@ with tab2:
     if not df_m.empty:
         df_c = df_m[df_m["positivo"]]
         if not df_c.empty:
-            fig = px.density_mapbox(df_c, lat="lat", lon="lon", z="qtd_alvo", radius=50, center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map", color_continuous_scale="Inferno")
-            fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450, coloraxis_showscale=False)
+            fig = px.density_mapbox(
+                df_c, lat="lat", lon="lon", z="qtd_alvo", 
+                radius=15,  # Reduzido de 50 para 15 (mancha mais concentrada)
+                center=dict(lat=clat, lon=clon), zoom=13, 
+                mapbox_style="open-street-map", 
+                color_continuous_scale="Inferno"
+            )
+            fig.update_layout(
+                margin=dict(l=0, r=0, t=0, b=0), 
+                height=450, 
+                coloraxis_showscale=False
+            )
+            # Força a escala de cores a começar do zero para não "apagar" os pontos
+            fig.update_traces(zmin=0, zmax=df_c["qtd_alvo"].max() if df_c["qtd_alvo"].max() > 0 else 1)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Nenhum positivo.")
