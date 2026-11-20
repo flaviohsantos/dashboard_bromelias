@@ -190,7 +190,6 @@ def _amostra(a, p, id_v, id_l, d):
     if not cod: return None
     return {"id_visita": id_v, "id_local": id_l, "codigo_amostra": normalizar_codigo(cod), "data_visita": d, "ph": a.get(f"{p}/ph_agua"), "temp": a.get(f"{p}/temp_agua_c"), "vol": a.get(f"{p}/volume_agua_ml"), "genero": a.get(f"{p}/genero") or "N/I", "porte": a.get(f"{p}/porte") or "N/I"}
 
-# --- NOVO: Contagem de recusas ---
 recusas = sum(1 for item in raw_campo if item.get("grp_abertura/consentimento") == "nao")
 
 for i, item in enumerate(raw_campo):
@@ -308,6 +307,28 @@ df_f["positivo"] = df_f["positivas"] > 0
 df_f["resolvido"] = df_f["positivo"] | (df_f["pendentes"] == 0)
 df_f["status"] = "Sem análise"; df_f.loc[df_f["resolvido"], "status"] = "Negativo"; df_f.loc[df_f["positivo"], "status"] = "Positivo"
 
+# --- NOVO: Botão de Exportação na Barra Lateral ---
+st.sidebar.markdown("---")
+st.sidebar.header("📥 Exportar para QGIS")
+
+df_qgis = df_f[["id_local", "bairro", "lat", "lon", "status", "n_exam", "positivas"]].copy()
+df_qgis = df_qgis.rename(columns={
+    "id_local": "Local", "bairro": "Bairro", "lat": "Latitude", "lon": "Longitude", 
+    "status": "Status_Lab", "n_exam": "Bromelias_Examinadas", "positivas": "Amostras_Positivas"
+})
+df_qgis = df_qgis.dropna(subset=["Latitude", "Longitude"])
+csv = df_qgis.to_csv(index=False, sep=";", decimal=",").encode('utf-8-sig')
+
+st.sidebar.download_button(
+    label="Baixar CSV Consolidado",
+    data=csv,
+    file_name="dados_qgis_consolidados.csv",
+    mime="text/csv",
+    help="Arquivo com coordenadas e status (Positivo/Negativo) para atualizar seus mapas no QGIS."
+)
+st.sidebar.caption("O arquivo respeita os filtros de data e critério selecionados acima.")
+
+# --- INDICADORES ---
 n_loc, n_res, n_pos = len(df_f), int(df_f["resolvido"].sum()), int(df_f["positivo"].sum())
 pos = (n_pos / n_res * 100) if n_res else 0
 n_exam, n_com = int(df_f["n_exam"].sum()), int(df_f["n_com"].sum())
@@ -325,37 +346,6 @@ if n_res == 0: niv, bg, cor, ico, msg = "SEM DADOS", "#EEEEEE", "#666666", "ℹ�
 elif pos < RISCO_MEDIO: niv, bg, cor, ico, msg = "BAIXO", "#D6EAF8", "#2E86AB", "✅", "Risco Baixo."
 elif pos < RISCO_ALTO: niv, bg, cor, ico, msg = "MÉDIO", "#FDEBD0", "#F4A261", "⚠️", f"Atenção ao bairro {b_alert}."
 else: niv, bg, cor, ico, msg = "ALTO", "#FADBD8", "#E63946", "🚨", f"Ação urgente em {b_alert}."
-
-# --- NOVO: Botão de Exportação na Barra Lateral ---
-st.sidebar.markdown("---")
-st.sidebar.header("📥 Exportar para QGIS")
-
-# Prepara a tabela cruzada apenas com o que o QGIS precisa
-df_qgis = df_f[["id_local", "bairro", "lat", "lon", "status", "n_exam", "positivas"]].copy()
-df_qgis = df_qgis.rename(columns={
-    "id_local": "Local", 
-    "bairro": "Bairro", 
-    "lat": "Latitude", 
-    "lon": "Longitude", 
-    "status": "Status_Lab",
-    "n_exam": "Bromelias_Examinadas",
-    "positivas": "Amostras_Positivas"
-})
-
-# Remove locais que não têm GPS (para o QGIS não plotar no oceano)
-df_qgis = df_qgis.dropna(subset=["Latitude", "Longitude"])
-
-# Gera o CSV com separador ';' e decimal ',' (padrão do Excel e QGIS Brasil)
-csv = df_qgis.to_csv(index=False, sep=";", decimal=",").encode('utf-8-sig')
-
-st.sidebar.download_button(
-    label="Baixar CSV Consolidado",
-    data=csv,
-    file_name="dados_qgis_consolidados.csv",
-    mime="text/csv",
-    help="Arquivo com coordenadas e status (Positivo/Negativo) para atualizar seus mapas no QGIS."
-)
-st.sidebar.caption("O arquivo respeita os filtros de data e critério selecionados acima.")
 
 # --- INTERFACE ---
 st.markdown("### 📊 Painel Executivo")
@@ -409,163 +399,7 @@ st.markdown("### ⏳ Amostras Pendentes")
 if not df_am.empty:
     df_p = df_am[df_am["pendente"]].copy()
     if not df_p.empty:
-        # Calcula os dias de espera
         df_p["Dias"] = (HOJE - df_p["data_visita"]).dt.days
-        
-        # Cria o link dinâmico para o formulário do laboratório
-        # O Kobo aceita o pré-preenchimento via URL usando a sintaxe ?d[nome_do_campo]=valor
-        df_p["Ação"] = df_p["codigo_amostra"].apply(
-            lambda cod: f"{URL_FORMULARIO_LAB}?d[grp_amostra/codigo_amostra]={cod}"
-        )
-        
-        # Formata a data para ficar bonita
+        df_p["Ação"] = df_p["codigo_amostra"].apply(lambda cod: f"{URL_FORMULARIO_LAB}?d[grp_amostra/codigo_amostra]={cod}")
         df_p["data_visita"] = pd.to_datetime(df_p["data_visita"]).dt.strftime("%d/%m/%Y")
-        
-        # Monta a tabela final
-        df_exibicao = df_p[["codigo_amostra", "id_local", "data_visita", "Dias", "Ação"]].rename(
-            columns={"codigo_amostra": "Código", "id_local": "Local", "data_visita": "Data"}
-        )
-        
-        # Exibe a tabela com o link clicável
-        st.dataframe(
-            df_exibicao,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Ação": st.column_config.LinkColumn(
-                    "Ação", display_text="🔬 Analisar", help="Clique para abrir o formulário de laboratório com o código preenchido."
-                )
-            }
-        )
-    else:
-        st.success("🎉 Todas analisadas!")
-else:
-    st.info("Sem amostras.")
-st.markdown("---")
-
-# --- MAPAS ---
-st.markdown("### 🗺️ Mapas de Risco")
-df_m = df_f.dropna(subset=["lat", "lon"])
-if not df_m.empty:
-    clat, clon = df_m["lat"].mean(), df_m["lon"].mean()
-else:
-    clat = clon = None
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📍 Base", "🔥 Calor", "🌐 Locais", "🏘️ Bairros", "🦠 SINAN"])
-
-with tab1:
-    if not df_m.empty:
-        col_m, col_t = st.columns([3, 1])
-        with col_m:
-            m_base = folium.Map(location=[clat, clon], zoom_start=16, tiles="OpenStreetMap")
-            for _, r in df_m.iterrows():
-                folium.Marker([r["lat"], r["lon"]], icon=folium.Icon(color=STATUS_ICONES[r["status"]]), popup=r["id_local"]).add_to(m_base)
-            st_folium(m_base, width=None, height=450, key="m1", returned_objects=[])
-        with col_t:
-            fig = go.Figure(go.Indicator(mode="gauge+number", value=pos, number={"suffix": "%"}, title={"text": niv}, gauge={"axis": {"range": [0, 100]}, "bar": {"color": cor}}))
-            fig.update_layout(height=350, margin=dict(l=10, r=10, t=50, b=10))
-            st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    st.markdown("#### 🔥 Mapa de Calor (Intensidade por Local)")
-    df_c = df_m[df_m["positivo"]] if not df_m.empty else df_m
-    if not df_c.empty:
-        fig_calor = go.Figure()
-        
-        # Desenha cada ponto positivo como um círculo grande e transparente
-        for _, row in df_c.iterrows():
-            # O tamanho do círculo é proporcional à quantidade de amostras (mínimo 50 para aparecer bem)
-            tamanho = max(50, row["qtd_alvo"] * 30)
-            fig_calor.add_trace(go.Scattermapbox(
-                lat=[row["lat"]],
-                lon=[row["lon"]],
-                mode="markers",
-                marker=dict(
-                    size=tamanho,
-                    color="#E63946", # Vermelho forte
-                    opacity=0.4      # Transparência para parecer um heatmap
-                ),
-                hovertext=f"{row['id_local']} - {int(row['qtd_alvo'])} amostras",
-                hoverinfo="text",
-                showlegend=False
-            ))
-            
-        fig_calor.update_layout(
-            mapbox=dict(style="open-street-map", center=dict(lat=clat, lon=clon), zoom=13),
-            margin=dict(l=0, r=0, t=0, b=0), height=450
-        )
-        st.plotly_chart(fig_calor, use_container_width=True)
-    else:
-        st.info("Nenhum local positivo para exibir no mapa de calor.")
-
-with tab3:
-    if not df_m.empty:
-        fig_loc = px.scatter_mapbox(df_m.assign(t=df_m["n_exam"].clip(lower=1)), lat="lat", lon="lon", size="t", color="status", color_discrete_map=STATUS_CORES, hover_name="id_local", center=dict(lat=clat, lon=clon), zoom=14, mapbox_style="open-street-map")
-        df_pos = df_m[df_m["status"] == "Positivo"]
-        if not df_pos.empty:
-            for _, row in df_pos.iterrows():
-                fig_loc.add_trace(go.Scattermapbox(lat=[row["lat"]], lon=[row["lon"]], mode="markers", marker=dict(size=100, color=STATUS_CORES["Positivo"], opacity=0.2), showlegend=False, hoverinfo="skip"))
-        fig_loc.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=450)
-        st.plotly_chart(fig_loc, use_container_width=True)
-
-with tab4:
-    if not df_m.empty:
-        df_b = df_m.groupby("bairro").agg(lat=("lat", "mean"), lon=("lon", "mean"), locais=("id_local", "count"), com_res=("resolvido", "sum"), pos=("positivo", "sum")).reset_index()
-        df_b["%"] = pct(df_b["pos"], df_b["com_res"]).fillna(0)
-        fig = px.scatter_mapbox(df_b, lat="lat", lon="lon", size="locais", color="%", color_continuous_scale=["#2E86AB", "#F4A261", "#E63946"], hover_name="bairro", center=dict(lat=clat, lon=clon), zoom=13, mapbox_style="open-street-map")
-        fig.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
-        st.plotly_chart(fig, use_container_width=True)
-
-with tab5:
-    render_sinan(df_m)
-
-# --- GRÁFICOS FINAIS E TABELAS ---
-
-st.markdown("---")
-st.markdown("### 📈 Série Temporal de Coletas")
-df_s = df_v.dropna(subset=["data_visita"]).copy()
-if not df_s.empty:
-    df_s["mes"] = df_s["data_visita"].dt.to_period("M").astype(str)
-    serie = df_s.groupby("mes").agg(visitas=("id_visita", "count"), bromelias=("n_exam", "sum")).reset_index()
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=serie["mes"], y=serie["visitas"], name="Visitas", marker_color="#2E86AB"))
-    fig.add_trace(go.Bar(x=serie["mes"], y=serie["bromelias"], name="Bromélias", marker_color="#7BC8A4"))
-    fig.update_layout(barmode="group", height=350)
-    st.plotly_chart(fig, use_container_width=True)
-
-g1, g2 = st.columns([2, 1])
-
-with g1:
-    st.markdown("### 🌦️ Sazonalidade da Positividade")
-    df_sz = df_am[df_am["analisada"]].dropna(subset=["data_visita"]).copy()
-    if not df_sz.empty:
-        df_sz["mes"] = df_sz["data_visita"].dt.to_period("M").astype(str)
-        sz = df_sz.groupby("mes").agg(analisadas=("codigo_amostra", "count"), positivas=("positiva", "sum")).reset_index()
-        sz["%"] = pct(sz["positivas"], sz["analisadas"]).fillna(0)
-        fig = px.line(sz, x="mes", y="%", markers=True, labels={"mes": "Mês", "%": "Amostras positivas (%)"}, hover_data=["analisadas", "positivas"])
-        fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10))
-        st.plotly_chart(fig, use_container_width=True)
-
-with g2:
-    st.markdown("### 🏘️ Ranking de Bairros")
-    df_tabela_rank = df_f.groupby("bairro").agg(Locais=("id_local", "count"), Com_resultado=("resolvido", "sum"), Locais_positivos=("positivo", "sum"), Bromelias=("n_exam", "sum"), Positivas=("positivas", "sum")).reset_index()
-    df_tabela_rank["% Locais positivos"] = pct(df_tabela_rank["Locais_positivos"], df_tabela_rank["Com_resultado"])
-    st.dataframe(df_tabela_rank.rename(columns={"bairro": "Bairro", "Com_resultado": "Com resultado", "Locais_positivos": "Locais positivos", "Bromelias": "Bromélias", "Positivas": "Bromélias positivas"}).sort_values(by="% Locais positivos", ascending=False, na_position="last"), hide_index=True, use_container_width=True)
-
-col_eco, col_tab = st.columns(2)
-
-with col_eco:
-    st.markdown(f"### 🔬 pH: {crit_nome} × Outros Imaturos")
-    df_ph = df_am[df_am["analisada"]].dropna(subset=["ph"]).copy()
-    if not df_ph.empty:
-        df_ph["Resultado"] = df_ph["positiva"].map({True: "Espécie-alvo", False: "Outros imaturos"})
-        fig_ph = px.box(df_ph, x="Resultado", y="ph", points="all", color="Resultado", color_discrete_map={"Espécie-alvo": "#E63946", "Outros imaturos": "#2E86AB"})
-        fig_ph.update_layout(height=350, margin=dict(l=10, r=10, t=30, b=10))
-        st.plotly_chart(fig_ph, use_container_width=True)
-
-with col_tab:
-    st.markdown("### 🦟 Totais por Espécie")
-    if not df_lab.empty:
-        df_esp = df_lab.groupby("especie").agg(Total=("qtd_especimes", "sum")).reset_index()
-        df_esp["especie"] = df_esp["especie"].str.replace("_", " ").str.capitalize()
-        st.dataframe(df_esp.rename(columns={"especie": "Espécie", "Total": "Espécimes"}), hide_index=True, use_container_width=True)
+        df_ex
