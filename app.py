@@ -326,6 +326,37 @@ elif pos < RISCO_MEDIO: niv, bg, cor, ico, msg = "BAIXO", "#D6EAF8", "#2E86AB", 
 elif pos < RISCO_ALTO: niv, bg, cor, ico, msg = "MÉDIO", "#FDEBD0", "#F4A261", "⚠️", f"Atenção ao bairro {b_alert}."
 else: niv, bg, cor, ico, msg = "ALTO", "#FADBD8", "#E63946", "🚨", f"Ação urgente em {b_alert}."
 
+# --- NOVO: Botão de Exportação na Barra Lateral ---
+st.sidebar.markdown("---")
+st.sidebar.header("📥 Exportar para QGIS")
+
+# Prepara a tabela cruzada apenas com o que o QGIS precisa
+df_qgis = df_f[["id_local", "bairro", "lat", "lon", "status", "n_exam", "positivas"]].copy()
+df_qgis = df_qgis.rename(columns={
+    "id_local": "Local", 
+    "bairro": "Bairro", 
+    "lat": "Latitude", 
+    "lon": "Longitude", 
+    "status": "Status_Lab",
+    "n_exam": "Bromelias_Examinadas",
+    "positivas": "Amostras_Positivas"
+})
+
+# Remove locais que não têm GPS (para o QGIS não plotar no oceano)
+df_qgis = df_qgis.dropna(subset=["Latitude", "Longitude"])
+
+# Gera o CSV com separador ';' e decimal ',' (padrão do Excel e QGIS Brasil)
+csv = df_qgis.to_csv(index=False, sep=";", decimal=",").encode('utf-8-sig')
+
+st.sidebar.download_button(
+    label="Baixar CSV Consolidado",
+    data=csv,
+    file_name="dados_qgis_consolidados.csv",
+    mime="text/csv",
+    help="Arquivo com coordenadas e status (Positivo/Negativo) para atualizar seus mapas no QGIS."
+)
+st.sidebar.caption("O arquivo respeita os filtros de data e critério selecionados acima.")
+
 # --- INTERFACE ---
 st.markdown("### 📊 Painel Executivo")
 col_a, col_b = st.columns([3, 2])
